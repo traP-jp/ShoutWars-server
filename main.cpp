@@ -16,7 +16,7 @@ int main() {
   });
 
   cout << "Server started at http://localhost:7468" << endl;
-  server.listen("localhost", 7468);
+  server.listen("0.0.0.0", 7468);
 
   return 0;
 }
