@@ -8,11 +8,11 @@ using namespace std;
 int main() {
   Server server;
 
-  server.Get("/", [](const Request& req, Response& res) {
+  server.Get(".*", [](const Request& req, Response& res) {
     json response;
-    response["message"] = "Hello, World!";
+    response["path"] = req.path;
     res.set_content(response.dump(), "application/json");
-    cout << "GET /\n" << response.dump() << "\n" << endl;
+    cout << "GET " << req.path << "\n" << response.dump() << "\n" << endl;
   });
 
   cout << "Server started at http://localhost:7468" << endl;
