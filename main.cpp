@@ -29,9 +29,16 @@ void responseMsgpack(Response &res, const json &data) {
   res.set_content(string(msgpack.begin(), msgpack.end()), "application/msgpack");
 }
 
+bool check_password(const Request &req, Response &res) {
+  if (password.empty() || req.get_header_value("Authorization") == "Bearer "s + password) return false;
+  res.status = 404;
+  return true;
+}
+
 void fallback_version(Server &server) {
   const string pattern = format(R"((?!{}/).*)", api_path);
   const Server::Handler handler = [&](const Request &req, Response &res) {
+    if (check_password(req, res)) return;
     res.status = 404;
     responseMsgpack(res, {
       { "error", format("Invalid API version. Use {}.", api_path) },
@@ -46,6 +53,7 @@ int main() {
   Server server;
 
   server.Get(api_path + "/status"s, [&](const Request &req, Response &res) {
+    if (check_password(req, res)) return;
     responseMsgpack(res, {
       { "room_count", 0 },
       { "room_limit", room_limit },
@@ -55,6 +63,7 @@ int main() {
   fallback_version(server);
 
   cout << format("Server started at http://localhost:{}", port) << endl;
+  if (!password.empty()) cout << format("Password: {}", password) << endl;
   server.listen("0.0.0.0", port);
 
   return 0;
