@@ -114,7 +114,7 @@ Content-Type は `application/msgpack` とします。
 {
   "session_id": uuid, // セッション ID
   "user_id": uuid, // 自分のユーザー ID
-  "room": Room, // 部屋情報
+  "room_info": RoomInfo, // 部屋情報
 }
 ```
 
@@ -125,11 +125,16 @@ Content-Type は `application/msgpack` とします。
 
 部屋の情報やゲームの状態を同期する。
 
+部屋の全ユーザーのリクエストが揃ってからレスポンスを返します。  
+ただし、最初のリクエストから 100 ms 以上経過したら即座にレスポンスを返し、送れたユーザーの報告イベントのみ次の同期に持ち越します。  
+5 秒間リクエストの無いユーザーは脱落となります。
+
 #### Request
 
 ```msgpack
 {
   "session_id": uuid, // セッション ID
+  "room_info": RoomInfo, // 部屋情報
   "reports": [{ // 報告イベント
     "id": uuid, // イベント ID
     "type": string, // イベントの種類
@@ -145,10 +150,9 @@ Content-Type は `application/msgpack` とします。
 
 #### Response
 
-部屋の全ユーザーのリクエストが揃ってからレスポンスを返します。前回のリクエストから 5 秒以上経過したユーザーは脱落となります。
-
 ```msgpack
 {
+  "id": uuid, // 同期 ID
   "reports": [{ // 報告イベント (id でソートされます)
     "id": uuid, // イベント ID
     "from": uuid, // 送信元のユーザー ID
