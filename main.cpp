@@ -34,7 +34,7 @@ void log_stdout(const string &msg) { cout << msg << endl; }
 void log_stderr(const string &msg) { cerr << msg << endl; }
 
 auto gen_auth_handler(const function<json(const json &)> &handle_json) {
-  return [&](const Request &req, Response &res) {
+  return [=](const Request &req, Response &res) {
     if (!password.empty() && req.get_header_value("Authorization") != "Bearer "s + password) {
       res.status = 404;
       return;
