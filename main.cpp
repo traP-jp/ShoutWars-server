@@ -75,9 +75,7 @@ int main() {
 
   const string invalid_ver_pattern = format(R"((?!{}/).*)", api_path);
   const Server::Handler invalid_ver_handler = gen_auth_handler(
-    [&](const json &req)-> json {
-      return { { "error", format("Invalid API version. Use {}.", api_path) } };
-    }
+    [&](const json &req) -> json { throw pair<int, string>(404, format("Invalid API version. Use {}.", api_path)); }
   );
   server.Get(invalid_ver_pattern, invalid_ver_handler);
   server.Post(invalid_ver_pattern, invalid_ver_handler);
