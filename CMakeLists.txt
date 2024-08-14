@@ -16,6 +16,6 @@ set(BOOST_ENABLE_CMAKE ON)
 FetchContent_Declare(Boost URL https://github.com/boostorg/boost/releases/download/boost-1.86.0.beta1/boost-1.86.0.beta1-cmake.tar.xz)
 FetchContent_MakeAvailable(Boost)
 
-add_executable(ShoutWars_server main.cpp)
+add_executable(ShoutWars_server main.cpp room.cpp)
 
 target_link_libraries(ShoutWars_server PRIVATE nlohmann_json::nlohmann_json httplib::httplib Boost::uuid)

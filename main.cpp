@@ -81,6 +81,23 @@ int main() {
   server.Get(invalid_ver_pattern, invalid_ver_handler);
   server.Post(invalid_ver_pattern, invalid_ver_handler);
 
+  server.Post(
+    api_path + "/room/create"s,
+    gen_auth_handler(
+      [&](const json &req) -> json {
+        cout << req.dump() << endl;
+        const string version = req.at("version");
+        const room_t::user_t owner(req.at("user").at("name"));
+        const int size = req.at("size");
+        return {
+          { "session_id", "TODO" },
+          { "user_id", to_string(owner.id) },
+          { "id", to_string(room_list.create(version, owner, size)->id) }
+        };
+      }
+    )
+  );
+
   server.Get(
     api_path + "/status"s,
     gen_auth_handler(
