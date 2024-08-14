@@ -21,6 +21,7 @@ room_list_t::room_list_t(logger log_info, logger log_error, const int limit)
   : log_info(move(log_info)), log_error(move(log_error)), limit(limit) {}
 
 shared_ptr<room_t> room_list_t::create(const string &version, const room_t::user_t &owner, const int size) {
+  lock_guard lock(rooms_mutex);
   if (rooms.size() >= limit) throw pair<int, string>(503, "Room limit reached.");
   auto room = make_shared<room_t>(version, owner, size);
   rooms[room->id] = room;

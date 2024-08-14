@@ -8,6 +8,7 @@
 #include <string>
 #include <functional>
 #include <exception>
+#include <utility>
 #include <cstdlib>
 
 using namespace std;
@@ -85,7 +86,6 @@ int main() {
     api_path + "/room/create"s,
     gen_auth_handler(
       [&](const json &req) -> json {
-        cout << req.dump() << endl;
         const string version = req.at("version");
         const room_t::user_t owner(req.at("user").at("name"));
         const int size = req.at("size");

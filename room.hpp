@@ -3,11 +3,15 @@
 #include <nlohmann/json.hpp>
 #include <boost/uuid/time_generator_v7.hpp>
 #include <boost/uuid/uuid.hpp>
+#include <mutex>
+#include <map>
 #include <string>
 #include <vector>
+#include <functional>
 #include <memory>
 
 class room_t {
+protected:
   static boost::uuids::time_generator_v7 gen_id;
 
 public:
@@ -36,6 +40,7 @@ public:
   logger log_info, log_error;
   int limit;
   std::map<boost::uuids::uuid, std::shared_ptr<room_t>> rooms;
+  mutable std::mutex rooms_mutex;
 
   explicit room_list_t(logger log_info, logger log_error, int limit);
 
