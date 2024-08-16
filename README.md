@@ -53,7 +53,7 @@ Content-Type は `application/msgpack` とします。
 
 ```msgpack
 {
-  "error": string, // エラーメッセージ
+  "error": string // エラーメッセージ
 }
 ```
 
@@ -73,9 +73,9 @@ Content-Type は `application/msgpack` とします。
 {
   "version": string, // クライアントのバージョン
   "user": {
-    "name": string, // ユーザー名 (32 文字以内)
+    "name": string // ユーザー名 (32 文字以内)
   },
-  "size": number, // 部屋の人数 (2~4 の整数)
+  "size": number // 部屋の人数 (2~4 の整数)
 }
 ```
 
@@ -85,7 +85,7 @@ Content-Type は `application/msgpack` とします。
 {
   "session_id": uuid, // セッション ID
   "user_id": uuid, // 自分のユーザー ID
-  "id": uuid, // 部屋 ID
+  "id": uuid // 部屋 ID
 }
 ```
 
@@ -103,8 +103,8 @@ Content-Type は `application/msgpack` とします。
   "version": string, // クライアントのバージョン
   "id": uuid, // 部屋 ID
   "user": {
-    "name": string, // ユーザー名 (32 文字以内)
-  },
+    "name": string // ユーザー名 (32 文字以内)
+  }
 }
 ```
 
@@ -114,7 +114,7 @@ Content-Type は `application/msgpack` とします。
 {
   "session_id": uuid, // セッション ID
   "user_id": uuid, // 自分のユーザー ID
-  "room_info": RoomInfo, // 部屋情報
+  "room_info": RoomInfo // 部屋情報
 }
 ```
 
@@ -138,13 +138,13 @@ Content-Type は `application/msgpack` とします。
   "reports": [{ // 報告イベント
     "id": uuid, // イベント ID
     "type": string, // イベントの種類
-    "event": Event, // イベントの内容
+    "event": Event // イベントの内容
   }],
   "actions": [{ // 確認イベント
     "id": uuid, // イベント ID
     "type": string, // イベントの種類
-    "event": Event, // イベントの内容
-  }],
+    "event": Event // イベントの内容
+  }]
 }
 ```
 
@@ -157,16 +157,38 @@ Content-Type は `application/msgpack` とします。
     "id": uuid, // イベント ID
     "from": uuid, // 送信元のユーザー ID
     "type": string, // イベントの種類
-    "event": Event, // イベントの内容
+    "event": Event // イベントの内容
   }],
   "actions": [{ // 確認イベント (id でソートされます)
     "id": uuid, // イベント ID
     "from": uuid, // 送信元のユーザー ID
     "type": string, // イベントの種類
-    "event": Event, // イベントの内容
+    "event": Event // イベントの内容
   }],
-  "drop_users": [uuid], // 脱落したユーザーの ID
+  "room_users": [uuid] // 部屋のユーザー ID (最初が部屋主)
 }
+```
+
+セッション ID が不正な場合は `401 Unauthorized` を返します。
+
+### `POST /room/start`
+
+ゲームを開始する。
+
+このリクエストは部屋主のみが送信できます。
+
+#### Request
+
+```msgpack
+{
+  "session_id": uuid // セッション ID
+}
+```
+
+#### Response
+
+```msgpack
+{}
 ```
 
 セッション ID が不正な場合は `401 Unauthorized` を返します。
@@ -180,6 +202,6 @@ Content-Type は `application/msgpack` とします。
 ```msgpack
 {
   "room_count": number, // 部屋数
-  "room_limit": number, // 部屋数の上限
+  "room_limit": number // 部屋数の上限
 }
 ```
