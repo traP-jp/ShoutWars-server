@@ -22,7 +22,7 @@ room_t::user_t::user_t(string name)
   }
 }
 
-room_t::user_t::user_t(const user_t &other) : id(gen_id()), name(other.name), last_time(other.last_time.load()) {}
+room_t::user_t::user_t(const user_t &other) : id(other.id), name(other.name), last_time(other.last_time.load()) {}
 
 void to_json(json &j, const room_t::user_t &user) {
   j = { { "id", to_string(user.id) }, { "name", user.name } };
