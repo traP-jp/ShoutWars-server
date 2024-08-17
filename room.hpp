@@ -64,6 +64,8 @@ public:
 
   std::list<user_t> get_users() const;
 
+  user_t get_owner() const;
+
   bool is_in_lobby() const;
 
   void start_game();

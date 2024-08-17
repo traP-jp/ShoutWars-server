@@ -107,6 +107,12 @@ list<room_t::user_t> room_t::get_users() const {
   return users;
 }
 
+room_t::user_t room_t::get_owner() const {
+  shared_lock lock(users_mutex);
+  if (users.empty()) throw not_found_error("Owner not found.");
+  return users.front();
+}
+
 bool room_t::is_in_lobby() const {
   return in_lobby;
 }

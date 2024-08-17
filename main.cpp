@@ -128,6 +128,19 @@ int main() {
     )
   );
 
+  server.Post(
+    api_path + "/room/start"s,
+    gen_auth_handler(
+      [&](const json &req) -> json {
+        const auto session = session_list.get(req.at("session_id"));
+        const auto room = room_list.get(session.room_id);
+        if (session.user_id != room->get_owner().id) throw forbidden_error("Only owner can start the game.");
+        room->start_game();
+        return {};
+      }
+    )
+  );
+
   server.Get(
     api_path + "/status"s,
     gen_auth_handler(
