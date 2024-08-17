@@ -2,7 +2,7 @@
 
 #include <boost/uuid/time_generator_v7.hpp>
 #include <boost/uuid/uuid.hpp>
-#include <mutex>
+#include <shared_mutex>
 #include <map>
 #include <functional>
 
@@ -22,9 +22,9 @@ class session_list_t {
 public:
   using logger = std::function<void(const std::string &)>;
 
-  logger log_info, log_error;
+  const logger log_error, log_info;
 
-  explicit session_list_t(logger log_info, logger log_error);
+  explicit session_list_t(logger log_error = [](const std::string &) {}, logger log_info = [](const std::string &) {});
 
   session_t create(const boost::uuids::uuid &room_id, const boost::uuids::uuid &user_id);
 
@@ -36,5 +36,5 @@ public:
 
 protected:
   std::map<boost::uuids::uuid, session_t> sessions;
-  mutable std::mutex sessions_mutex;
+  mutable std::shared_mutex sessions_mutex;
 };

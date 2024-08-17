@@ -69,8 +69,8 @@ auto gen_auth_handler(const function<json(const json &)> &handle_json) {
 }
 
 int main() {
-  session_list_t session_list(log_stdout, log_stderr);
-  room_list_t room_list(log_stdout, log_stderr, room_limit);
+  session_list_t session_list(log_stderr, log_stdout);
+  room_list_t room_list(room_limit, log_stderr, log_stdout);
 
   Server server;
 
@@ -121,9 +121,9 @@ int main() {
         const uuid room_id = req.at("id");
         const room_t::user_t user(req.at("user").at("name"));
         const auto room = room_list.get(room_id);
-        // TODO: join room
+        room->join(version, user);
         const auto session = session_list.create(room_id, user.id);
-        return { { "session_id", session.id }, { "user_id", user.id }, { "id", room->id } };
+        return { { "session_id", session.id }, { "user_id", user.id }, { "room_info", room->get_info() } };
       }
     )
   );
@@ -132,7 +132,7 @@ int main() {
     api_path + "/status"s,
     gen_auth_handler(
       [&](const json &req) -> json {
-        return { { "room_count", room_list.count() }, { "room_limit", room_list.limit } };
+        return { { "room_count", room_list.count() }, { "room_limit", room_list.limit.load() } };
       }
     )
   );
