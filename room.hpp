@@ -66,7 +66,7 @@ public:
 
   bool exists(boost::uuids::uuid id) const;
 
-  void remove(boost::uuids::uuid id);
+  bool remove(boost::uuids::uuid id);
 
   size_t count() const;
 

@@ -32,7 +32,7 @@ public:
 
   bool exists(boost::uuids::uuid id) const;
 
-  session_t remove(boost::uuids::uuid id);
+  bool remove(boost::uuids::uuid id);
 
 protected:
   std::map<boost::uuids::uuid, session_t> sessions;

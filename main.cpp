@@ -1,4 +1,6 @@
+#include "session.hpp"
 #include "room.hpp"
+#include "errors.hpp"
 
 #include <nlohmann/json.hpp>
 #include <httplib.h>
@@ -10,10 +12,7 @@
 #include <string>
 #include <functional>
 #include <exception>
-#include <utility>
 #include <cstdlib>
-
-#include "session.hpp"
 
 using namespace std;
 using namespace boost::uuids;
@@ -47,7 +46,7 @@ template<> struct nlohmann::adl_serializer<uuid> {
     try {
       uuid = gen_uuid_from_string(j.get<string>());
     } catch (const runtime_error &err) {
-      throw pair(400, format("Invalid UUID: {}", err.what()));
+      throw bad_request_error(format("Invalid UUID: {}", err.what()));
     }
   }
 };
@@ -64,7 +63,7 @@ auto gen_auth_handler(const function<json(const json &)> &handle_json) {
       );
       res.set_content(string(msgpack.begin(), msgpack.end()), "application/msgpack");
     } catch (const json::exception &err) {
-      throw pair<int, string>(400, err.what());
+      throw bad_request_error(err.what());
     }
   };
 }
@@ -79,9 +78,9 @@ int main() {
     [&](const Request &req, Response &res, const exception_ptr &ep) {
       try {
         rethrow_exception(ep);
-      } catch (const pair<int, string> &err) {
-        res.status = err.first;
-        const auto msgpack = json::to_msgpack(json{ { "error", err.second } });
+      } catch (const error &err) {
+        res.status = err.code;
+        const auto msgpack = json::to_msgpack(json{ { "error", err.what() } });
         res.set_content(string(msgpack.begin(), msgpack.end()), "application/msgpack");
       } catch (const exception &err) {
         res.status = 500;
@@ -95,7 +94,7 @@ int main() {
 
   const string invalid_ver_pattern = format(R"((?!{}/).*)", api_path);
   const Server::Handler invalid_ver_handler = gen_auth_handler(
-    [&](const json &req) -> json { throw pair<int, string>(404, format("Invalid API version. Use {}.", api_path)); }
+    [&](const json &req) -> json { throw not_found_error(format("Invalid API version. Use {}.", api_path)); }
   );
   server.Get(invalid_ver_pattern, invalid_ver_handler);
   server.Post(invalid_ver_pattern, invalid_ver_handler);
@@ -110,6 +109,21 @@ int main() {
         const auto room = room_list.create(version, owner, size);
         const auto session = session_list.create(room->id, owner.id);
         return { { "session_id", session.id }, { "user_id", owner.id }, { "id", room->id } };
+      }
+    )
+  );
+
+  server.Post(
+    api_path + "/room/join"s,
+    gen_auth_handler(
+      [&](const json &req) -> json {
+        const string version = req.at("version");
+        const uuid room_id = req.at("id");
+        const room_t::user_t user(req.at("user").at("name"));
+        const auto room = room_list.get(room_id);
+        // TODO: join room
+        const auto session = session_list.create(room_id, user.id);
+        return { { "session_id", session.id }, { "user_id", user.id }, { "id", room->id } };
       }
     )
   );

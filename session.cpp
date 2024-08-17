@@ -1,5 +1,6 @@
 #include "session.hpp"
 
+#include "errors.hpp"
 #include <utility>
 
 using namespace std;
@@ -25,7 +26,11 @@ session_t session_list_t::create(const uuid &room_id, const uuid &user_id) {
 
 session_t session_list_t::get(const uuid id) const {
   lock_guard lock(sessions_mutex);
-  return sessions.at(id);
+  try {
+    return sessions.at(id);
+  } catch (const out_of_range &) {
+    throw unauthorized_error("Session not found.");
+  }
 }
 
 bool session_list_t::exists(const uuid id) const {
@@ -33,9 +38,7 @@ bool session_list_t::exists(const uuid id) const {
   return sessions.contains(id);
 }
 
-session_t session_list_t::remove(const uuid id) {
+bool session_list_t::remove(const uuid id) {
   lock_guard lock(sessions_mutex);
-  const auto session = sessions.at(id);
-  sessions.erase(id);
-  return session;
+  return sessions.erase(id) > 0;
 }
