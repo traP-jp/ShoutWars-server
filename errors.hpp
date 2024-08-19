@@ -29,6 +29,11 @@ public:
   explicit not_found_error(const std::string &what) : error(404, what) {}
 };
 
+class too_many_requests_error final : public error {
+public:
+  explicit too_many_requests_error(const std::string &what) : error(429, what) {}
+};
+
 class internal_server_error final : public error {
 public:
   explicit internal_server_error(const std::string &what) : error(500, what) {}

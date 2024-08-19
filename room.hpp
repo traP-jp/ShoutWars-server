@@ -1,42 +1,92 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
-#include <boost/uuid/time_generator_v7.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <chrono>
-#include <thread>
 #include <atomic>
+#include <condition_variable>
 #include <shared_mutex>
 #include <mutex>
+#include <thread>
 #include <map>
+#include <set>
 #include <string>
-#include <list>
+#include <vector>
 #include <functional>
 #include <memory>
 
 class room_t {
 public:
+  // Note that although user_t is mutable, it is not thread-safe.
   class user_t {
-    friend class room_t;
-
   public:
     const boost::uuids::uuid id;
 
-    explicit user_t(std::string name);
-
-    user_t(const user_t &other);
+    explicit user_t(const std::string &name);
 
     friend void to_json(nlohmann::json &j, const user_t &user);
 
     std::string get_name() const;
 
-    void set_name(std::string new_name);
+    void set_name(const std::string &new_name);
+
+    boost::uuids::uuid get_last_sync_id() const;
+
+    std::chrono::steady_clock::time_point get_last_time() const;
+
+    void update_last(boost::uuids::uuid new_sync_id);
 
   protected:
     std::string name;
-    mutable std::shared_mutex name_mutex;
+    boost::uuids::uuid last_sync_id;
+    std::chrono::steady_clock::time_point last_time;
+  };
 
-    std::atomic<std::chrono::steady_clock::time_point> last_time;
+  class sync_record_t {
+  public:
+    enum class phase_t {
+      CREATED = 0, SYNCING = 1, SYNCED = 2
+    };
+
+    class event_t {
+    public:
+      const boost::uuids::uuid id;
+      const boost::uuids::uuid from;
+      const std::string type;
+      const nlohmann::json data;
+
+      explicit event_t(boost::uuids::uuid id, boost::uuids::uuid from, std::string type, nlohmann::json data);
+
+      friend void to_json(nlohmann::json &j, const event_t &event);
+    };
+
+    const boost::uuids::uuid id;
+
+    explicit sync_record_t();
+
+    phase_t get_phase() const;
+
+    bool advance_phase(phase_t new_phase);
+
+    void add_events(
+      boost::uuids::uuid from, const std::vector<std::shared_ptr<event_t>> &new_reports,
+      const std::vector<std::shared_ptr<event_t>> &new_actions
+    );
+
+    std::vector<std::shared_ptr<event_t>> get_reports() const;
+
+    std::vector<std::shared_ptr<event_t>> get_actions() const;
+
+    void add_synced(boost::uuids::uuid user_id);
+
+    bool is_synced(boost::uuids::uuid user_id) const;
+
+  protected:
+    phase_t phase = phase_t::CREATED;
+    std::map<boost::uuids::uuid, std::shared_ptr<event_t>> reports;
+    std::map<boost::uuids::uuid, std::shared_ptr<event_t>> actions;
+    std::set<boost::uuids::uuid> synced_users;
+    mutable std::shared_mutex record_mutex;
   };
 
   using logger = std::function<void(const std::string &)>;
@@ -62,7 +112,11 @@ public:
 
   size_t kick_expired(std::chrono::milliseconds timeout);
 
-  std::list<user_t> get_users() const;
+  size_t count_users() const;
+
+  std::vector<boost::uuids::uuid> get_user_ids() const;
+
+  std::vector<user_t> get_users() const;
 
   user_t get_owner() const;
 
@@ -70,20 +124,28 @@ public:
 
   void start_game();
 
-  const nlohmann::json &get_info() const;
+  bool is_available() const;
+
+  nlohmann::json get_info() const;
 
   void update_info(const nlohmann::json &new_info);
 
+  std::vector<std::shared_ptr<sync_record_t>> sync(
+    boost::uuids::uuid user_id, const std::vector<std::shared_ptr<sync_record_t::event_t>> &reports,
+    const std::vector<std::shared_ptr<sync_record_t::event_t>> &actions
+  );
+
+  size_t clean_sync_records();
+
 protected:
-  static boost::uuids::time_generator_v7 gen_id;
+  static boost::uuids::uuid gen_id();
 
-  std::list<user_t> users;
-  mutable std::shared_mutex users_mutex;
-
-  std::atomic<bool> in_lobby = true;
-
+  std::map<boost::uuids::uuid, user_t> users;
+  bool in_lobby = true;
   nlohmann::json info;
-  mutable std::mutex info_mutex;
+  std::map<boost::uuids::uuid, std::shared_ptr<sync_record_t>> sync_records;
+  mutable std::shared_mutex room_mutex;
+  std::condition_variable_any sync_cv;
 };
 
 class room_list_t {
@@ -91,7 +153,6 @@ public:
   using logger = std::function<void(const std::string &)>;
 
   const logger log_error, log_info;
-  std::atomic<size_t> limit;
 
   explicit room_list_t(
     size_t limit, logger log_error = [](const std::string &) {}, logger log_info = [](const std::string &) {}
@@ -107,7 +168,11 @@ public:
 
   size_t count() const;
 
-  std::list<std::shared_ptr<room_t>> get_all() const;
+  std::vector<std::shared_ptr<room_t>> get_all() const;
+
+  size_t get_limit() const;
+
+  void set_limit(size_t new_limit);
 
   bool start_cleaner(std::chrono::milliseconds interval, std::chrono::milliseconds timeout);
 
@@ -115,6 +180,7 @@ public:
 
 protected:
   std::map<boost::uuids::uuid, std::shared_ptr<room_t>> rooms;
+  size_t limit;
   mutable std::shared_mutex rooms_mutex;
 
   std::thread cleaner;

@@ -141,16 +141,71 @@ int main() {
     )
   );
 
-  server.Get(
-    api_path + "/status"s,
+  server.Post(
+    api_path + "/room/sync"s,
     gen_auth_handler(
       [&](const json &req) -> json {
-        return { { "room_count", room_list.count() }, { "room_limit", room_list.limit.load() } };
+        const auto session = session_list.get(req.at("session_id"));
+        const auto room = room_list.get(session.room_id);
+        if (std::chrono::steady_clock::now() - room->get_user(session.user_id).get_last_time() < 100ms) {
+          throw too_many_requests_error("Wait 100ms before sending another sync request.");
+        }
+        vector<shared_ptr<room_t::sync_record_t::event_t>> user_reports, user_actions;
+        for (const auto &report_j: req.at("reports")) {
+          user_reports.emplace_back(
+            make_shared<room_t::sync_record_t::event_t>(
+              report_j.at("id"),
+              session.user_id,
+              report_j.at("type"),
+              report_j.at("event")
+            )
+          );
+        }
+        for (const auto &action_j: req.at("actions")) {
+          user_actions.emplace_back(
+            make_shared<room_t::sync_record_t::event_t>(
+              action_j.at("id"),
+              session.user_id,
+              action_j.at("type"),
+              action_j.at("event")
+            )
+          );
+        }
+        if (session.user_id == room->get_owner().id) room->update_info(req.at("room_info"));
+        const auto records = room->sync(session.user_id, user_reports, user_actions);
+        json reports = json::array(), actions = json::array();
+        for (const auto &record: records) {
+          for (const auto &report: record->get_reports() | views::filter(
+                                     [&](const auto &r) { return r->from != session.user_id; }
+                                   )) {
+            reports.emplace_back(*report);
+            reports.back()["sync_id"] = record->id;
+          }
+          for (const auto &action: record->get_actions()) {
+            actions.emplace_back(*action);
+            actions.back()["sync_id"] = record->id;
+          }
+        }
+        return {
+          { "id", records.back()->id },
+          { "reports", reports },
+          { "actions", actions },
+          { "room_users", room->get_users() }
+        };
       }
     )
   );
 
-  room_list.start_cleaner(1s, 5s);
+  server.Get(
+    api_path + "/status"s,
+    gen_auth_handler(
+      [&](const json &req) -> json {
+        return { { "room_count", room_list.count() }, { "room_limit", room_list.get_limit() } };
+      }
+    )
+  );
+
+  room_list.start_cleaner(3s, 10s);
 
   log_stdout(format("Server started at http://localhost:{}", port));
   if (!password.empty()) log_stdout(format("Password: {}", password));

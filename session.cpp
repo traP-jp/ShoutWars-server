@@ -2,13 +2,17 @@
 
 #include "errors.hpp"
 #include <boost/uuid/uuid_io.hpp>
+#include <boost/uuid/uuid_generators.hpp>
 #include <format>
 #include <utility>
 
 using namespace std;
 using namespace boost::uuids;
 
-time_generator_v7 session_t::gen_id{};
+uuid session_t::gen_id() {
+  thread_local time_generator_v7 gen;
+  return gen();
+}
 
 // session
 

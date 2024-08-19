@@ -1,6 +1,5 @@
 #pragma once
 
-#include <boost/uuid/time_generator_v7.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <shared_mutex>
 #include <map>
@@ -15,7 +14,7 @@ public:
   explicit session_t(boost::uuids::uuid room_id, boost::uuids::uuid user_id);
 
 protected:
-  static boost::uuids::time_generator_v7 gen_id;
+  static boost::uuids::uuid gen_id();
 };
 
 class session_list_t {
