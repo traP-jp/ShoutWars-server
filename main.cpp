@@ -38,7 +38,7 @@ string getenv_or(const string &key, const string &default_value) {
 
 // constants
 
-constexpr int api_ver = 0;
+constexpr int api_ver = 1;
 const string api_path = format("/v{}", api_ver);
 
 const int port = stoi(getenv_or("PORT", "7468"));

@@ -68,7 +68,7 @@ Content-Type は `application/msgpack` とします。
 環境変数 `PORT` でポート番号を指定できます。デフォルトは `7468` です。  
 環境変数 `PASSWORD` が設定されている場合、リクエストヘッダの `Authorization` に `Bearer ${PASSWORD}` を指定する必要があります。
 
-エンドポイントは `/v0` です。`uuid` は UUIDv7 で生成された文字列としています。  
+エンドポイントは `/v1` です。`uuid` は UUIDv7 で生成された文字列としています。  
 また、それ以外のプリミティブでない型はクライアント側の実装に依存します。
 
 ### `POST /room/create`
