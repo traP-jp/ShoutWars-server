@@ -1,8 +1,6 @@
 #include "room.hpp"
 
 #include "errors.hpp"
-#include <boost/uuid/uuid_io.hpp>
-#include <boost/uuid/uuid_generators.hpp>
 #include <format>
 #include <ranges>
 #include <utility>
@@ -33,8 +31,10 @@ string room_t::user_t::get_name() const {
 }
 
 void room_t::user_t::set_name(const string &new_name) {
-  if (new_name.empty() || new_name.size() > 32) {
-    throw bad_request_error(format("Invalid user name length: {}. Must be between 1 and 32.", new_name.size()));
+  if (new_name.empty() || new_name.size() > name_max_length) {
+    throw bad_request_error(
+      format("Invalid user name length: {}. Must be between 1 and {}.", new_name.size(), name_max_length)
+    );
   }
   name = new_name;
 }
@@ -124,10 +124,14 @@ room_t::sync_record_t::phase_t room_t::sync_record_t::get_max_phase() const {
 room_t::room_t(string version, const user_t &owner, size_t size, logger log_error, logger log_info)
   : log_error(move(log_error)), log_info(move(log_info)), id(gen_id()), version(move(version)), size(size),
     users{ { owner.id, owner } } {
-  if (this->version.empty() || this->version.size() > 32) {
-    throw bad_request_error(format("Invalid room version length: {}. Must be between 1 and 32.", this->version.size()));
+  if (this->version.empty() || this->version.size() > version_max_length) {
+    throw bad_request_error(
+      format("Invalid room version length: {}. Must be between 1 and {}.", this->version.size(), version_max_length)
+    );
   }
-  if (size < 2 || size > 4) throw bad_request_error(format("Invalid room size: {}. Must be between 2 and 4.", size));
+  if (size < 2 || size > size_max) {
+    throw bad_request_error(format("Invalid room size: {}. Must be between 2 and {}.", size, size_max));
+  }
   const auto record = make_shared<sync_record_t>();
   sync_records.emplace(record->id, record);
   users.begin()->second.update_last(nil_uuid());
@@ -227,7 +231,8 @@ void room_t::update_info(const json &new_info) {
 
 vector<shared_ptr<room_t::sync_record_t>> room_t::sync(
   const uuid user_id, const vector<shared_ptr<sync_record_t::event_t>> &reports,
-  const vector<shared_ptr<sync_record_t::event_t>> &actions
+  const vector<shared_ptr<sync_record_t::event_t>> &actions, const chrono::milliseconds wait_timeout,
+  const chrono::milliseconds sync_timeout
 ) {
   unique_lock lock(room_mutex);
   if (!users.contains(user_id)) throw forbidden_error("User not in the room.");
@@ -241,7 +246,7 @@ vector<shared_ptr<room_t::sync_record_t>> room_t::sync(
   // wait for users who didn't skip last sync
   if (record->get_max_phase() <= sync_record_t::phase_t::WAITING && sync_records.size() > 1) {
     if (next(sync_records.rbegin())->second->get_phase(user.id) < sync_record_t::phase_t::SYNCED) {
-      sync_cv.wait_for(lock, 200ms, [&] { return record->get_max_phase() > sync_record_t::phase_t::WAITING; });
+      sync_cv.wait_for(lock, wait_timeout, [&] { return record->get_max_phase() > sync_record_t::phase_t::WAITING; });
     }
   }
   record->advance_phase(user.id, sync_record_t::phase_t::SYNCING);
@@ -252,7 +257,7 @@ vector<shared_ptr<room_t::sync_record_t>> room_t::sync(
     users,
     [&](const pair<uuid, user_t> &u) { return record->get_phase(u.first) <= sync_record_t::phase_t::CREATED; }
   )) {
-    sync_cv.wait_for(lock, 50ms, [&] { return record->get_max_phase() > sync_record_t::phase_t::SYNCING; });
+    sync_cv.wait_for(lock, sync_timeout, [&] { return record->get_max_phase() > sync_record_t::phase_t::SYNCING; });
   }
   record->advance_phase(user.id, sync_record_t::phase_t::SYNCED);
   sync_cv.notify_all();

@@ -1,8 +1,6 @@
 #include "session.hpp"
 
 #include "errors.hpp"
-#include <boost/uuid/uuid_io.hpp>
-#include <boost/uuid/uuid_generators.hpp>
 #include <format>
 #include <utility>
 

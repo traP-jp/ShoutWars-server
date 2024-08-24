@@ -1,8 +1,9 @@
 #pragma once
 
-#include <boost/uuid/uuid.hpp>
+#include <boost/uuid.hpp>
 #include <shared_mutex>
 #include <map>
+#include <string>
 #include <functional>
 
 class session_t {

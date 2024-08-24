@@ -1,7 +1,7 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
-#include <boost/uuid/uuid.hpp>
+#include <boost/uuid.hpp>
 #include <chrono>
 #include <condition_variable>
 #include <shared_mutex>
@@ -16,6 +16,8 @@ public:
   // Note that although user_t is mutable, it is not thread-safe.
   class user_t {
   public:
+    static constexpr size_t name_max_length = 32;
+
     const boost::uuids::uuid id;
 
     explicit user_t(const std::string &name);
@@ -52,9 +54,7 @@ public:
       friend void to_json(nlohmann::json &j, const event_t &event);
     };
 
-    enum class phase_t {
-      CREATED = 0, WAITING = 1, SYNCING = 2, SYNCED = 3
-    };
+    enum class phase_t { CREATED = 0, WAITING = 1, SYNCING = 2, SYNCED = 3 };
 
     const boost::uuids::uuid id;
 
@@ -83,6 +83,9 @@ public:
   };
 
   using logger = std::function<void(const std::string &)>;
+
+  static constexpr size_t version_max_length = 32;
+  static constexpr size_t size_max = 4;
 
   const logger log_error, log_info;
 
@@ -125,7 +128,9 @@ public:
 
   std::vector<std::shared_ptr<sync_record_t>> sync(
     boost::uuids::uuid user_id, const std::vector<std::shared_ptr<sync_record_t::event_t>> &reports,
-    const std::vector<std::shared_ptr<sync_record_t::event_t>> &actions
+    const std::vector<std::shared_ptr<sync_record_t::event_t>> &actions,
+    std::chrono::milliseconds wait_timeout = std::chrono::milliseconds{ 200 },
+    std::chrono::milliseconds sync_timeout = std::chrono::milliseconds{ 50 }
   );
 
   size_t clean_sync_records();

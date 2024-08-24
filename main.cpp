@@ -4,9 +4,8 @@
 
 #include <nlohmann/json.hpp>
 #include <httplib.h>
-#include <boost/uuid/uuid_io.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid.hpp>
+#include <boost/uuid.hpp>
+#include <chrono>
 #include <atomic>
 #include <thread>
 #include <iostream>
@@ -35,6 +34,9 @@ const string api_path(format("/v{}", api_ver));
 const int port = stoi(getenv_or("PORT", "7468"));
 const string password = getenv_or("PASSWORD", "");
 const int room_limit = stoi(getenv_or("ROOM_LIMIT", "100"));
+
+constexpr auto expire_timeout = 10s;
+constexpr auto cleaner_interval = 3s;
 
 void log_stdout(const string &msg) { cout << msg << endl; }
 void log_stderr(const string &msg) { cerr << msg << endl; }
@@ -216,7 +218,7 @@ int main() {
     [&] {
       while (running) {
         try {
-          room_list.clean(10s);
+          room_list.clean(expire_timeout);
           session_list.clean(
             [&](const session_t &session) {
               return !room_list.exists(session.room_id) || !room_list.get(session.room_id)->has_user(session.user_id);
@@ -227,7 +229,7 @@ int main() {
         }catch (...) {
           log_stderr("Unknown cleanup error");
         }
-        this_thread::sleep_for(3s);
+        this_thread::sleep_for(cleaner_interval);
       }
     }
   );
