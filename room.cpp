@@ -121,9 +121,13 @@ room_t::sync_record_t::phase_t room_t::sync_record_t::get_max_phase() const {
 
 // room
 
-room_t::room_t(string version, const user_t &owner, size_t size, logger log_error, logger log_info)
-  : log_error(move(log_error)), log_info(move(log_info)), id(gen_id()), version(move(version)), size(size),
-    users{ { owner.id, owner } } {
+room_t::room_t(
+  string version, const user_t &owner, size_t size, const chrono::minutes lobby_lifetime,
+  const chrono::minutes game_lifetime, logger log_error, logger log_info
+)
+  : log_error(move(log_error)), log_info(move(log_info)), lobby_lifetime(lobby_lifetime), game_lifetime(game_lifetime),
+    id(gen_id()), version(move(version)), size(size), expire_time(chrono::steady_clock::now() + lobby_lifetime),
+    users{ { owner.id, owner } }, in_lobby(true) {
   if (this->version.empty() || this->version.size() > version_max_length) {
     throw bad_request_error(
       format("Invalid room version length: {}. Must be between 1 and {}.", this->version.size(), version_max_length)
@@ -207,6 +211,7 @@ void room_t::start_game() {
   if (!in_lobby) throw forbidden_error("Game already started.");
   if (users.size() < 2) throw forbidden_error("Not enough players to start the game.");
   in_lobby = false;
+  expire_time = chrono::steady_clock::now() + game_lifetime;
   const auto users_view = users | views::values;
   log_info(
     format("Game started: {} (users={})", to_string(id), json(vector(users_view.begin(), users_view.end())).dump())
@@ -215,6 +220,7 @@ void room_t::start_game() {
 
 bool room_t::is_available() const {
   shared_lock lock(room_mutex);
+  if (chrono::steady_clock::now() > expire_time) return false;
   if (in_lobby) return !users.empty();
   return users.size() > 1;
 }
@@ -302,13 +308,17 @@ size_t room_t::clean_sync_records() {
 
 // room list
 
-room_list_t::room_list_t(const size_t limit, logger log_error, logger log_info)
-  : log_error(move(log_error)), log_info(move(log_info)), limit(limit) {}
+room_list_t::room_list_t(
+  const size_t limit, const chrono::minutes lobby_lifetime, const chrono::minutes game_lifetime, logger log_error,
+  logger log_info
+)
+  : log_error(move(log_error)), log_info(move(log_info)), lobby_lifetime(lobby_lifetime), game_lifetime(game_lifetime),
+    limit(limit) {}
 
 shared_ptr<room_t> room_list_t::create(const string &version, const room_t::user_t &owner, const size_t size) {
   lock_guard lock(rooms_mutex);
   if (rooms.size() >= limit) throw forbidden_error(format("Room limit reached. Max room count is {}.", limit));
-  const auto room = make_shared<room_t>(version, owner, size, log_error, log_info);
+  const auto room = make_shared<room_t>(version, owner, size, lobby_lifetime, game_lifetime, log_error, log_info);
   rooms[room->id] = room;
   log_info(
     format(
@@ -366,10 +376,10 @@ void room_list_t::set_limit(const size_t new_limit) {
   limit = new_limit;
 }
 
-void room_list_t::clean(const chrono::milliseconds timeout) {
+void room_list_t::clean(const chrono::milliseconds user_timeout) {
   for (const shared_ptr<room_t> &room: get_all()) {
     if (!room->is_available()) remove(room->id);
-    room->kick_expired(timeout);
+    room->kick_expired(user_timeout);
     room->clean_sync_records();
   }
 }

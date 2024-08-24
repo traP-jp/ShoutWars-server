@@ -89,12 +89,15 @@ public:
 
   const logger log_error, log_info;
 
+  const std::chrono::minutes lobby_lifetime;
+  const std::chrono::minutes game_lifetime;
   const boost::uuids::uuid id;
   const std::string version;
   const size_t size;
 
   explicit room_t(
-    std::string version, const user_t &owner, size_t size, logger log_error = [](const std::string &) {},
+    std::string version, const user_t &owner, size_t size, std::chrono::minutes lobby_lifetime,
+    std::chrono::minutes game_lifetime, logger log_error = [](const std::string &) {},
     logger log_info = [](const std::string &) {}
   );
 
@@ -138,8 +141,9 @@ public:
 protected:
   static boost::uuids::uuid gen_id();
 
+  std::chrono::steady_clock::time_point expire_time;
   std::map<boost::uuids::uuid, user_t> users;
-  bool in_lobby = true;
+  bool in_lobby;
   nlohmann::json info;
   std::map<boost::uuids::uuid, std::shared_ptr<sync_record_t>> sync_records;
   mutable std::shared_mutex room_mutex;
@@ -152,8 +156,12 @@ public:
 
   const logger log_error, log_info;
 
+  const std::chrono::minutes lobby_lifetime;
+  const std::chrono::minutes game_lifetime;
+
   explicit room_list_t(
-    size_t limit, logger log_error = [](const std::string &) {}, logger log_info = [](const std::string &) {}
+    size_t limit, std::chrono::minutes lobby_lifetime, std::chrono::minutes game_lifetime,
+    logger log_error = [](const std::string &) {}, logger log_info = [](const std::string &) {}
   );
 
   std::shared_ptr<room_t> create(const std::string &version, const room_t::user_t &owner, size_t size);
@@ -172,7 +180,7 @@ public:
 
   void set_limit(size_t new_limit);
 
-  void clean(std::chrono::milliseconds timeout);
+  void clean(std::chrono::milliseconds user_timeout);
 
 protected:
   std::map<boost::uuids::uuid, std::shared_ptr<room_t>> rooms;

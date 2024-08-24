@@ -29,11 +29,13 @@ string getenv_or(const string &key, const string &default_value) {
 }
 
 constexpr int api_ver = 0;
-const string api_path(format("/v{}", api_ver));
+const string api_path = format("/v{}", api_ver);
 
 const int port = stoi(getenv_or("PORT", "7468"));
 const string password = getenv_or("PASSWORD", "");
 const int room_limit = stoi(getenv_or("ROOM_LIMIT", "100"));
+const chrono::minutes lobby_lifetime(stoi(getenv_or("LOBBY_LIFETIME", "10")));
+const chrono::minutes game_lifetime(stoi(getenv_or("GAME_LIFETIME", "20")));
 
 constexpr auto expire_timeout = 10s;
 constexpr auto cleaner_interval = 3s;
@@ -78,7 +80,7 @@ int main() {
   log_stdout(format("ShoutWars backend server v{} starting...", api_ver));
 
   session_list_t session_list(log_stderr, log_stdout);
-  room_list_t room_list(room_limit, log_stderr, log_stdout);
+  room_list_t room_list(room_limit, lobby_lifetime, game_lifetime, log_stderr, log_stdout);
 
   Server server;
 

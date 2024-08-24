@@ -45,6 +45,14 @@ cd ..
 
 でサーバーを起動します。
 
+## 環境変数
+
+- `PORT`: ポート番号 (デフォルト: `7468`)
+- `PASSWORD`: パスワード (デフォルト: なし)
+- `ROOM_LIMIT`: 部屋数の上限 (デフォルト: `100`)
+- `LOBBY_LIFETIME`: 各部屋のロビーの制限時間 (デフォルト: `10` 分)
+- `GAME_LIFETIME`: 各部屋のゲームの制限時間 (デフォルト: `20` 分)
+
 ## API 仕様
 
 Request と Response の body は MessagePack 形式でやり取りします。  
@@ -89,9 +97,6 @@ Content-Type は `application/msgpack` とします。
 }
 ```
 
-サーバーの部屋数が上限に達している場合は `403 Forbidden` を返します。  
-部屋数の上限は環境変数 `ROOM_LIMIT` で指定できます。デフォルトは `100` です。
-
 ### `POST /room/join`
 
 部屋に参加する。
@@ -117,9 +122,6 @@ Content-Type は `application/msgpack` とします。
   "room_info": RoomInfo // 部屋情報
 }
 ```
-
-部屋が存在しない場合は `404 Not Found` を返します。  
-また、部屋は存在するが入れない場合は `403 Forbidden` を返します。
 
 ### `POST /room/sync`
 
@@ -174,7 +176,6 @@ Content-Type は `application/msgpack` とします。
 }
 ```
 
-セッション ID が不正な場合は `401 Unauthorized` を返します。  
 レスポンスを返してから 100 ms 以内にリクエストが来た場合は即座に `429 Too Many Requests` を返します。
 
 ### `POST /room/start`
@@ -196,8 +197,6 @@ Content-Type は `application/msgpack` とします。
 ```msgpack
 {}
 ```
-
-セッション ID が不正な場合は `401 Unauthorized` を返します。
 
 ### `GET /status`
 
