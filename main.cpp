@@ -1,6 +1,8 @@
 #include "session.hpp"
+#include "room_list.hpp"
 #include "room.hpp"
 #include "errors.hpp"
+#include "sync_record.hpp"
 
 #include <nlohmann/json.hpp>
 #include <httplib.h>
@@ -23,10 +25,18 @@ using Request = httplib::Request;
 using Response = httplib::Response;
 using json = nlohmann::json;
 
+/**
+ * Get the value of an environment variable or a default value.
+ * @param key The name of the environment variable.
+ * @param default_value The default value.
+ * @return The value of the environment variable if it exists, or the default value.
+ */
 string getenv_or(const string &key, const string &default_value) {
   const char *value = getenv(key.c_str());
   return value ? value : default_value;
 }
+
+// constants
 
 constexpr int api_ver = 0;
 const string api_path = format("/v{}", api_ver);
@@ -43,7 +53,9 @@ constexpr auto cleaner_interval = 3s;
 void log_stdout(const string &msg) { cout << msg << endl; }
 void log_stderr(const string &msg) { cerr << msg << endl; }
 
-constexpr string_generator gen_uuid_from_string{};
+// UUID
+
+constexpr string_generator gen_uuid_from_string;
 
 template<> struct nlohmann::adl_serializer<uuid> {
   static void to_json(json &j, const uuid &uuid) { j = to_string(uuid); }
@@ -57,6 +69,13 @@ template<> struct nlohmann::adl_serializer<uuid> {
   }
 };
 
+// API handler
+
+/**
+ * Generate a handler for the API endpoint.
+ * @param handle_json The function to handle the JSON request.
+ * @return The handler for the API endpoint.
+ */
 auto gen_auth_handler(const function<json(const json &)> &handle_json) {
   return [=](const Request &req, Response &res) {
     if (!password.empty() && req.get_header_value("Authorization") != "Bearer "s + password) {
@@ -73,6 +92,8 @@ auto gen_auth_handler(const function<json(const json &)> &handle_json) {
     }
   };
 }
+
+// entry point
 
 int main() {
   log_stdout("");
@@ -160,10 +181,10 @@ int main() {
         if (std::chrono::steady_clock::now() - room->get_user(session.user_id).get_last_time() < 100ms) {
           throw too_many_requests_error("Wait 100ms before sending another sync request.");
         }
-        vector<shared_ptr<room_t::sync_record_t::event_t>> user_reports, user_actions;
+        vector<shared_ptr<sync_record_t::event_t>> user_reports, user_actions;
         for (const auto &report_j: req.at("reports")) {
           user_reports.emplace_back(
-            make_shared<room_t::sync_record_t::event_t>(
+            make_shared<sync_record_t::event_t>(
               report_j.at("id"),
               session.user_id,
               report_j.at("type"),
@@ -173,7 +194,7 @@ int main() {
         }
         for (const auto &action_j: req.at("actions")) {
           user_actions.emplace_back(
-            make_shared<room_t::sync_record_t::event_t>(
+            make_shared<sync_record_t::event_t>(
               action_j.at("id"),
               session.user_id,
               action_j.at("type"),
@@ -181,8 +202,10 @@ int main() {
             )
           );
         }
+
         if (session.user_id == room->get_owner().id) room->update_info(req.at("room_info"));
         const auto records = room->sync(session.user_id, user_reports, user_actions);
+
         json reports = json::array(), actions = json::array();
         for (const auto &record: records) {
           for (const auto &report: record->get_reports() | views::filter(
@@ -228,7 +251,7 @@ int main() {
           );
         } catch (exception &err) {
           log_stderr(format("Cleanup error: {}", err.what()));
-        }catch (...) {
+        } catch (...) {
           log_stderr("Unknown cleanup error");
         }
         this_thread::sleep_for(cleaner_interval);
