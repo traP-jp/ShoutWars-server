@@ -1,0 +1,17 @@
+{
+  "name": "shoutwars-server-tester",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "traP",
+  "license": "MIT",
+  "packageManager": "pnpm@9.8.0",
+  "dependencies": {
+    "@msgpack/msgpack": "3.0.0-beta2",
+    "uuidv7": "^1.0.1"
+  }
+}
