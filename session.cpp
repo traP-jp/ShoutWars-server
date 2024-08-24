@@ -60,3 +60,14 @@ bool session_list_t::remove(const uuid id) {
   }
   return false;
 }
+
+size_t session_list_t::clean(const function<bool(const session_t &)> &is_expired) {
+  lock_guard lock(sessions_mutex);
+  return erase_if(sessions, [&](const pair<uuid, session_t> &session) {
+    if (is_expired(session.second)) {
+      log_info(format("Session expired: {}", to_string(session.first)));
+      return true;
+    }
+    return false;
+  });
+}

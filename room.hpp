@@ -3,13 +3,9 @@
 #include <nlohmann/json.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <chrono>
-#include <atomic>
 #include <condition_variable>
 #include <shared_mutex>
-#include <mutex>
-#include <thread>
 #include <map>
-#include <set>
 #include <string>
 #include <vector>
 #include <functional>
@@ -44,10 +40,6 @@ public:
 
   class sync_record_t {
   public:
-    enum class phase_t {
-      CREATED = 0, SYNCING = 1, SYNCED = 2
-    };
-
     class event_t {
     public:
       const boost::uuids::uuid id;
@@ -60,13 +52,13 @@ public:
       friend void to_json(nlohmann::json &j, const event_t &event);
     };
 
+    enum class phase_t {
+      CREATED = 0, WAITING = 1, SYNCING = 2, SYNCED = 3
+    };
+
     const boost::uuids::uuid id;
 
     explicit sync_record_t();
-
-    phase_t get_phase() const;
-
-    bool advance_phase(phase_t new_phase);
 
     void add_events(
       boost::uuids::uuid from, const std::vector<std::shared_ptr<event_t>> &new_reports,
@@ -77,15 +69,16 @@ public:
 
     std::vector<std::shared_ptr<event_t>> get_actions() const;
 
-    void add_synced(boost::uuids::uuid user_id);
+    phase_t get_phase(boost::uuids::uuid user_id);
 
-    bool is_synced(boost::uuids::uuid user_id) const;
+    bool advance_phase(boost::uuids::uuid user_id, phase_t new_phase);
+
+    phase_t get_max_phase() const;
 
   protected:
-    phase_t phase = phase_t::CREATED;
     std::map<boost::uuids::uuid, std::shared_ptr<event_t>> reports;
     std::map<boost::uuids::uuid, std::shared_ptr<event_t>> actions;
-    std::set<boost::uuids::uuid> synced_users;
+    std::map<boost::uuids::uuid, phase_t> users_phase;
     mutable std::shared_mutex record_mutex;
   };
 
@@ -174,16 +167,10 @@ public:
 
   void set_limit(size_t new_limit);
 
-  bool start_cleaner(std::chrono::milliseconds interval, std::chrono::milliseconds timeout);
-
-  void stop_cleaner();
+  void clean(std::chrono::milliseconds timeout);
 
 protected:
   std::map<boost::uuids::uuid, std::shared_ptr<room_t>> rooms;
   size_t limit;
   mutable std::shared_mutex rooms_mutex;
-
-  std::thread cleaner;
-  std::atomic<bool> is_cleaner_running = false;
-  mutable std::mutex cleaner_mutex;
 };

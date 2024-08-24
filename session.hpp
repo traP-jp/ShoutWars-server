@@ -33,6 +33,8 @@ public:
 
   bool remove(boost::uuids::uuid id);
 
+  size_t clean(const std::function<bool(const session_t &)> &is_expired);
+
 protected:
   std::map<boost::uuids::uuid, session_t> sessions;
   mutable std::shared_mutex sessions_mutex;

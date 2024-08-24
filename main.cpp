@@ -7,6 +7,8 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid.hpp>
+#include <atomic>
+#include <thread>
 #include <iostream>
 #include <format>
 #include <string>
@@ -69,6 +71,10 @@ auto gen_auth_handler(const function<json(const json &)> &handle_json) {
 }
 
 int main() {
+  log_stdout("");
+  log_stdout("==========================================================");
+  log_stdout(format("ShoutWars backend server v{} starting...", api_ver));
+
   session_list_t session_list(log_stderr, log_stdout);
   room_list_t room_list(room_limit, log_stderr, log_stdout);
 
@@ -179,11 +185,11 @@ int main() {
                                      [&](const auto &r) { return r->from != session.user_id; }
                                    )) {
             reports.emplace_back(*report);
-            reports.back()["sync_id"] = record->id;
+            if (record->id != records.back()->id) reports.back()["sync_id"] = record->id;
           }
           for (const auto &action: record->get_actions()) {
             actions.emplace_back(*action);
-            actions.back()["sync_id"] = record->id;
+            if (record->id != records.back()->id) actions.back()["sync_id"] = record->id;
           }
         }
         return {
@@ -205,11 +211,46 @@ int main() {
     )
   );
 
-  room_list.start_cleaner(3s, 10s);
+  atomic<bool> running = true;
+  thread cleaner_thread(
+    [&] {
+      while (running) {
+        try {
+          room_list.clean(10s);
+          session_list.clean(
+            [&](const session_t &session) {
+              return !room_list.exists(session.room_id) || !room_list.get(session.room_id)->has_user(session.user_id);
+            }
+          );
+        } catch (exception &err) {
+          log_stderr(format("Cleanup error: {}", err.what()));
+        }catch (...) {
+          log_stderr("Unknown cleanup error");
+        }
+        this_thread::sleep_for(3s);
+      }
+    }
+  );
 
+  log_stdout("");
   log_stdout(format("Server started at http://localhost:{}", port));
   if (!password.empty()) log_stdout(format("Password: {}", password));
-  server.listen("0.0.0.0", port);
+
+  try {
+    server.listen("0.0.0.0", port);
+  } catch (const exception &err) {
+    log_stderr("");
+    log_stderr(format("Server error: {}", err.what()));
+  } catch (...) {
+    log_stderr("");
+    log_stderr("Unknown server error");
+  }
+
+  running = false;
+  cleaner_thread.join();
+
+  log_stdout("");
+  log_stdout("Server stopped");
 
   return 0;
 }
