@@ -53,13 +53,16 @@ public:
   const std::chrono::minutes game_lifetime;
   const boost::uuids::uuid id;
   const std::string version;
+  const std::string name;
   const size_t size;
 
   [[nodiscard]] explicit room_t(
-    std::string version, const user_t &owner, size_t size, std::chrono::minutes lobby_lifetime,
+    std::string version, const user_t &owner, std::string name, size_t size, std::chrono::minutes lobby_lifetime,
     std::chrono::minutes game_lifetime, logger log_error = [](const std::string &) {},
     logger log_info = [](const std::string &) {}
   );
+
+  [[nodiscard]] std::chrono::steady_clock::time_point get_expire_time() const;
 
   void join(std::string version, const user_t &user);
 

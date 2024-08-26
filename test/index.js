@@ -22,7 +22,7 @@ async function send(method, path, data) {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-let room = "";
+let roomName = "";
 let alice = "";
 let bob = "";
 
@@ -35,9 +35,10 @@ let bob = "";
 
 (async () => {
   await send("POST", "/room/create", { version: "0.1", user: { name: "Alice" }, size: 4 });
-  room = responses.at(-1).id;
   const session = responses.at(-1).session_id;
   alice = responses.at(-1).user_id;
+  const room = responses.at(-1).id;
+  roomName = responses.at(-1).name;
   for (let i = 0; i < 20; i++) {
     const reports = [];
     const actions = [];
@@ -51,10 +52,11 @@ let bob = "";
 })().catch(console.error);
 
 (async () => {
-  while (room) await wait(50);
+  while (!roomName) await wait(50);
   await wait(1000);
-  await send("POST", "/room/join", { version: "0.1", id: room, user: { name: "Bob" } });
+  await send("POST", "/room/join", { version: "0.1", name: roomName, user: { name: "Bob" } });
   const session = responses.at(-1).session_id;
+  const room = responses.at(-1).id;
   bob = responses.at(-1).user_id;
   for (let i = responses.at(-1).room_info + 1; i < 60; i++) {
     const reports = [];

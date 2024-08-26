@@ -1,6 +1,7 @@
 #include "room_list.hpp"
 
 #include "errors.hpp"
+#include <random>
 #include <format>
 #include <utility>
 
@@ -19,14 +20,22 @@ room_list_t::room_list_t(
 shared_ptr<room_t> room_list_t::create(const string &version, const room_t::user_t &owner, const size_t size) {
   lock_guard lock(rooms_mutex);
   if (rooms.size() >= limit) throw forbidden_error(format("Room limit reached. Max room count is {}.", limit));
-  const auto room = make_shared<room_t>(version, owner, size, lobby_lifetime, game_lifetime, log_error, log_info);
+  thread_local mt19937_64 gen_rand(random_device{}());
+  thread_local uniform_int_distribution dist(0uLL, stoull(string(name_length, '9')));
+  string name;
+  do {
+    name = format("{:0{}}", dist(gen_rand), name_length);
+  } while (name_to_id.contains(name));
+  const auto room = make_shared<room_t>(version, owner, name, size, lobby_lifetime, game_lifetime, log_error, log_info);
   rooms[room->id] = room;
+  name_to_id[name] = room->id;
   log_info(
     format(
-      "Room created: {} (version={}, owner_id={}, size={})",
+      "Room created: {} (version={}, owner_id={}, name={}, size={})",
       to_string(room->id),
       version,
       to_string(owner.id),
+      name,
       size
     )
   );
@@ -42,13 +51,28 @@ shared_ptr<room_t> room_list_t::get(const uuid id) const {
   }
 }
 
+shared_ptr<room_t> room_list_t::get(const string &name) const {
+  shared_lock lock(rooms_mutex);
+  try {
+    return rooms.at(name_to_id.at(name));
+  } catch (const out_of_range &) {
+    throw not_found_error("Room not found.");
+  }
+}
+
 bool room_list_t::exists(const uuid id) const {
   shared_lock lock(rooms_mutex);
   return rooms.contains(id);
 }
 
+bool room_list_t::exists(const string &name) const {
+  shared_lock lock(rooms_mutex);
+  return name_to_id.contains(name);
+}
+
 bool room_list_t::remove(const uuid id) {
   lock_guard lock(rooms_mutex);
+  name_to_id.erase(rooms.at(id)->name);
   if (rooms.erase(id) > 0) {
     log_info(format("Room removed: {}", to_string(id)));
     return true;
