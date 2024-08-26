@@ -61,6 +61,8 @@ public:
     logger log_info = [](const std::string &) {}
   );
 
+  [[nodiscard]] std::chrono::steady_clock::time_point get_expire_time() const;
+
   void join(std::string version, const user_t &user);
 
   [[nodiscard]] user_t get_user(boost::uuids::uuid id) const;

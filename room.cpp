@@ -74,6 +74,11 @@ room_t::room_t(
   users.begin()->second.update_last(nil_uuid());
 }
 
+chrono::steady_clock::time_point room_t::get_expire_time() const {
+  shared_lock lock(room_mutex);
+  return expire_time;
+}
+
 void room_t::join(string version, const user_t &user) {
   if (version != this->version) {
     throw bad_request_error(format("Invalid room version: {}. This roon version is {}.", version, this->version));
