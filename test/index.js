@@ -52,7 +52,7 @@ let bob = "";
 })().catch(console.error);
 
 (async () => {
-  while (roomName) await wait(50);
+  while (!roomName) await wait(50);
   await wait(1000);
   await send("POST", "/room/join", { version: "0.1", name: roomName, user: { name: "Bob" } });
   const session = responses.at(-1).session_id;
