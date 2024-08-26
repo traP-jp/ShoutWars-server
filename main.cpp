@@ -38,7 +38,7 @@ string getenv_or(const string &key, const string &default_value) {
 
 // constants
 
-constexpr int api_ver = 1;
+constexpr int api_ver = 2;
 const string api_path = format("/v{}", api_ver);
 
 const int port = stoi(getenv_or("PORT", "7468"));
@@ -139,7 +139,7 @@ int main() {
         const size_t size = req.at("size");
         const auto room = room_list.create(version, owner, size);
         const auto session = session_list.create(room->id, owner.id);
-        return { { "session_id", session.id }, { "user_id", owner.id }, { "id", room->id } };
+        return { { "session_id", session.id }, { "user_id", owner.id }, { "id", room->id }, { "name", room->name } };
       }
     )
   );
@@ -149,12 +149,16 @@ int main() {
     gen_auth_handler(
       [&](const json &req) -> json {
         const string version = req.at("version");
-        const uuid room_id = req.at("id");
+        const auto room = room_list.get(string(req.at("name")));
         const room_t::user_t user(req.at("user").at("name"));
-        const auto room = room_list.get(room_id);
         room->join(version, user);
-        const auto session = session_list.create(room_id, user.id);
-        return { { "session_id", session.id }, { "user_id", user.id }, { "room_info", room->get_info() } };
+        const auto session = session_list.create(room->id, user.id);
+        return {
+          { "session_id", session.id },
+          { "id", room->id },
+          { "user_id", user.id },
+          { "room_info", room->get_info() }
+        };
       }
     )
   );

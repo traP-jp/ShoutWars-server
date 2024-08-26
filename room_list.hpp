@@ -15,6 +15,8 @@ class room_list_t {
 public:
   using logger = std::function<void(const std::string &)>;
 
+  static constexpr size_t name_length = 6; // name is actually a 6-digit number
+
   const logger log_error, log_info;
 
   const std::chrono::minutes lobby_lifetime;
@@ -29,7 +31,11 @@ public:
 
   [[nodiscard]] std::shared_ptr<room_t> get(boost::uuids::uuid id) const;
 
+  [[nodiscard]] std::shared_ptr<room_t> get(const std::string &name) const;
+
   [[nodiscard]] bool exists(boost::uuids::uuid id) const;
+
+  [[nodiscard]] bool exists(const std::string &name) const;
 
   bool remove(boost::uuids::uuid id);
 
@@ -45,6 +51,7 @@ public:
 
 protected:
   mutable std::shared_mutex rooms_mutex;
-  std::map<boost::uuids::uuid, std::shared_ptr<room_t>> rooms;
   size_t limit;
+  std::map<boost::uuids::uuid, std::shared_ptr<room_t>> rooms;
+  std::map<std::string, boost::uuids::uuid> name_to_id;
 };

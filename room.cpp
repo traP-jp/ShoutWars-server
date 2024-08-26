@@ -55,12 +55,12 @@ void room_t::user_t::update_last(const uuid new_sync_id) {
 // room
 
 room_t::room_t(
-  string version, const user_t &owner, size_t size, const chrono::minutes lobby_lifetime,
+  string version, const user_t &owner, string name, size_t size, const chrono::minutes lobby_lifetime,
   const chrono::minutes game_lifetime, logger log_error, logger log_info
 )
   : log_error(move(log_error)), log_info(move(log_info)), lobby_lifetime(lobby_lifetime), game_lifetime(game_lifetime),
-    id(gen_id()), version(move(version)), size(size), expire_time(chrono::steady_clock::now() + lobby_lifetime),
-    users{ { owner.id, owner } }, in_lobby(true) {
+    id(gen_id()), version(move(version)), name(move(name)), size(size),
+    expire_time(chrono::steady_clock::now() + lobby_lifetime), users{ { owner.id, owner } }, in_lobby(true) {
   if (this->version.empty() || this->version.size() > version_max_length) {
     throw bad_request_error(
       format("Invalid room version length: {}. Must be between 1 and {}.", this->version.size(), version_max_length)
