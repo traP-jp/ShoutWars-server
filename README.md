@@ -1,6 +1,9 @@
-# ShoutWars (仮) バックエンド
+# ShoutWars バックエンド
 
-ワンマンソン 2024 レジェンドクリエイターズのゲーム
+© 2024 traP Community  
+ライセンス: [MIT License](LICENSE)
+
+traP ワンマンソン 2024 レジェンドクリエイターズのゲーム
 
 クライアント: [traP-jp/ShoutWars](https://github.com/traP-jp/ShoutWars)
 
