@@ -145,7 +145,7 @@ bool room_t::is_in_lobby() const {
 }
 
 void room_t::start_game() {
-  shared_lock lock(room_mutex);
+  lock_guard lock(room_mutex);
   if (!in_lobby) throw forbidden_error("Game already started.");
   if (users.size() < 2) throw forbidden_error("Not enough players to start the game.");
   in_lobby = false;
