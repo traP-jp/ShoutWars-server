@@ -10,9 +10,9 @@ pub struct Config {
     pub room_limit: usize,
     pub lobby_lifetime: Duration,
     pub game_lifetime: Duration,
-    /// tick の幅 (仕様「tick の進行」)。参加時の応答で `tick_ms` として通知する。
+    /// tick の幅。参加時の応答で `tick_ms` として通知する。
     pub tick: Duration,
-    /// 部屋ごとに保持する同期レコードの数 (仕様「配送」)。
+    /// 部屋ごとに保持する同期レコードの数。
     /// これより古い `next_tick` は追いつけない。
     pub record_retention: usize,
 }
@@ -49,7 +49,7 @@ impl Default for Config {
 }
 
 impl Config {
-    /// tick の幅をミリ秒で返す。クライアントへは `tick_ms` として渡す (仕様「tick の進行」)。
+    /// tick の幅をミリ秒で返す。クライアントへは `tick_ms` として渡す。
     #[must_use]
     pub fn tick_ms(&self) -> u64 {
         u64::try_from(self.tick.as_millis()).unwrap_or(u64::MAX)

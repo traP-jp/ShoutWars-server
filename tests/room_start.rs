@@ -138,7 +138,7 @@ async fn 無効なセッションは拒む() {
         .send()
         .await;
 
-    // 部屋の存在に言及しない (仕様「存在の秘匿について」)。
+    // 部屋の存在に言及しない。
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
     assert_eq!(reply.error_code(), "invalid_session");
 }

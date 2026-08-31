@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::msgpack::MsgPack;
 
-/// 仕様「エラー」で定めたエラー。
+/// 仕様で定めたエラー。
 ///
 /// `code` で分岐し `message` は表示にのみ使う、という契約を型で表す。
 /// 文言を変えてもクライアントの分岐が壊れない。
@@ -14,9 +14,9 @@ use crate::msgpack::MsgPack;
 pub enum Error {
     /// リクエストの形式が不正。理由を添える。
     BadRequest(String),
-    /// 上限を超えた (仕様「制限値」)。何の上限かを添える。
+    /// 上限を超えた。何の上限かを添える。
     LimitExceeded(String),
-    /// 本文が 1 MiB を超えた (仕様「上限の一覧」)。読まずに拒む。
+    /// 本文が 1 MiB を超えた。読まずに拒む。
     PayloadTooLarge,
     Unauthorized,
     InvalidSession,
@@ -34,7 +34,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
-    /// 機械可読な識別子 (仕様「エラーコード一覧」)。
+    /// 機械可読な識別子。
     fn code(&self) -> &'static str {
         match self {
             Self::BadRequest(_) => "bad_request",

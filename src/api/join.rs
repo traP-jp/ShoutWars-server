@@ -25,7 +25,7 @@ pub struct Response {
     user_id: Uuid,
     id: Uuid,
     room_info: Value,
-    /// 最初の同期で申告するカーソル (仕様「配送」)。
+    /// 最初の同期で申告するカーソル。
     next_tick: u64,
     tick_ms: u64,
 }

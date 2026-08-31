@@ -29,7 +29,7 @@ pub struct Response {
     user_id: Uuid,
     id: Uuid,
     name: RoomNumber,
-    /// 最初の同期で申告するカーソル。作成直後なので 0 から始まる (仕様「配送」)。
+    /// 最初の同期で申告するカーソル。作成直後なので 0 から始まる。
     next_tick: u64,
     tick_ms: u64,
 }

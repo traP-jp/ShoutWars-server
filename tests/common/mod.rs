@@ -169,20 +169,20 @@ pub struct Reply {
 }
 
 impl Reply {
-    /// 本文を MessagePack として読む。Content-Type も併せて確かめる (仕様「API」)。
+    /// 本文を MessagePack として読む。Content-Type も併せて確かめる。
     pub fn msgpack<T: DeserializeOwned>(&self) -> T {
         assert_eq!(
             self.content_type.as_deref(),
             Some("application/msgpack"),
             "Content-Type が仕様と異なります"
         );
-        // サーバーと同じ表現を選ぶ。UUID は 16 バイトの配列ではなく文字列で流れる (仕様「API」)。
+        // サーバーと同じ表現を選ぶ。UUID は 16 バイトの配列ではなく文字列で流れる。
         let mut deserializer =
             rmp_serde::Deserializer::from_read_ref(&self.body).with_human_readable();
         T::deserialize(&mut deserializer).expect("本文を MessagePack として読めません")
     }
 
-    /// エラー本文を読み、`code` を返す (仕様「エラーの形式」)。
+    /// エラー本文を読み、`code` を返す。
     ///
     /// `message` が空でないことも確かめる。UI に表示される値であり、
     /// 空だとクライアントが何も出せなくなる。
