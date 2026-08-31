@@ -16,6 +16,11 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.26.0", features = ["v4", "serde"] }
 
+[dev-dependencies]
+# デプロイ先 (HTTPS) に対しても同じテストを流せるようにする。
+# OpenSSL への依存を避けるため TLS は rustls を使う。
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 

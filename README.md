@@ -33,6 +33,16 @@ cargo fmt                    # 整形
 cargo test                   # テスト
 ```
 
+テストはサーバーを空きポートで起動し、HTTP 越しに叩いて仕様どおりの応答かを確かめる。`TEST_SERVER_URL` を指定すると、代わりにそのサーバーへ同じテストを流す。デプロイ先の確認に使える。
+
+```sh
+TEST_SERVER_URL=https://example.com TEST_SERVER_PASSWORD=... cargo test
+```
+
+このとき、サーバーの設定に依存するテストは設定を制御できないため実行されない。
+
+未実装の機能に対するテストは `#[ignore]` を付けてある。`cargo test -- --ignored` で残りを確認できる。
+
 ## 環境変数
 
 | 変数 | 既定値 | 内容 |

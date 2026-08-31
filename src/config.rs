@@ -4,10 +4,6 @@ use std::{env, fmt, str::FromStr, time::Duration};
 ///
 /// 不正な値は既定値へフォールバックせず、起動を中止する。
 #[derive(Debug, Clone)]
-#[expect(
-    dead_code,
-    reason = "部屋の管理を実装するまで使わない。使い始めれば この属性自体が警告になる"
-)]
 pub struct Config {
     pub port: u16,
     pub password: Option<String>,
@@ -30,17 +26,41 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+/// 環境変数が無い場合の値。README の表と一致していなければならない。
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            port: 7468,
+            password: None,
+            room_limit: 100,
+            lobby_lifetime: Duration::from_mins(10),
+            game_lifetime: Duration::from_mins(20),
+        }
+    }
+}
+
 impl Config {
     /// 環境変数を読んで検証する。
+    ///
+    /// # Errors
+    /// 値を解釈できない、または許される範囲を外れている場合。
     pub fn from_env() -> Result<Self, ConfigError> {
+        let default = Self::default();
         Ok(Self {
-            port: parse("PORT", 7468)?,
+            port: parse("PORT", default.port)?,
             password: env::var("PASSWORD").ok().filter(|s| !s.is_empty()),
-            room_limit: positive("ROOM_LIMIT", 100)?,
-            lobby_lifetime: Duration::from_secs(positive::<u64>("LOBBY_LIFETIME", 10)? * 60),
-            game_lifetime: Duration::from_secs(positive::<u64>("GAME_LIFETIME", 20)? * 60),
+            room_limit: positive("ROOM_LIMIT", default.room_limit)?,
+            lobby_lifetime: minutes("LOBBY_LIFETIME", default.lobby_lifetime)?,
+            game_lifetime: minutes("GAME_LIFETIME", default.game_lifetime)?,
         })
     }
+}
+
+/// 分単位で指定される時間を読む。
+fn minutes(name: &'static str, default: Duration) -> Result<Duration, ConfigError> {
+    Ok(Duration::from_secs(
+        positive(name, default.as_secs() / 60)? * 60,
+    ))
 }
 
 fn parse<T>(name: &'static str, default: T) -> Result<T, ConfigError>
