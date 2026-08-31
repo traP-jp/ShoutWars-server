@@ -47,6 +47,7 @@ pub fn app(config: &Config) -> Router {
     Router::new()
         .route("/v3/status", get(api::status::status))
         .route("/v3/room/create", post(api::create::create))
+        .route("/v3/room/join", post(api::join::join))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_password,

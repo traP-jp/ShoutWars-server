@@ -10,6 +10,7 @@ use std::{
     time::Instant,
 };
 
+use rmpv::Value;
 use uuid::Uuid;
 
 use crate::{
@@ -79,6 +80,50 @@ impl Rooms {
         Ok(self.by_number.entry(number).or_insert(room))
     }
 
+    /// 部屋に参加する (§4.3)。
+    ///
+    /// # Errors
+    /// 部屋が無い・期限切れ・バージョン不一致・開始済み・満員・名前が長すぎる場合。
+    pub fn join(
+        &mut self,
+        number: RoomNumber,
+        version: &str,
+        name: String,
+    ) -> Result<Joined, Error> {
+        self.sweep();
+        // 期限切れは sweep で消えているため、ここに残っていれば有効な部屋である (§3.1)。
+        let room = self.by_number.get_mut(&number).ok_or(Error::RoomNotFound)?;
+        if room.version != version {
+            return Err(Error::VersionMismatch);
+        }
+        if room.started_at.is_some() {
+            return Err(Error::GameStarted);
+        }
+        if room.is_full() {
+            return Err(Error::RoomFull);
+        }
+
+        let user = User::new(name)?;
+        let joined = Joined {
+            session_id: user.session_id,
+            user_id: user.id,
+            room_id: room.id,
+            room_info: room.info.clone(),
+            tick: room.current_tick(self.config.tick, Instant::now()),
+        };
+        self.sessions.insert(
+            user.session_id,
+            Session {
+                room: number,
+                user: user.id,
+            },
+        );
+        tracing::info!(id = %room.id, %number, user_id = %user.id, "部屋に参加しました");
+        // ユーザー ID は UUIDv7 で単調に増えるため、末尾へ足せば昇順が保たれる (§3.4)。
+        room.users.push(user);
+        Ok(joined)
+    }
+
     /// 空いている部屋番号を引く。使用中なら引き直す (§3.2)。
     fn take_number(&self) -> Result<RoomNumber, Error> {
         (0..NUMBERING_ATTEMPTS)
@@ -86,6 +131,16 @@ impl Rooms {
             .find(|number| !self.by_number.contains_key(number))
             .ok_or(Error::RoomLimitReached)
     }
+}
+
+/// `join` の結果。部屋への借用を返さずに済むよう、必要な値だけ取り出す。
+#[derive(Debug)]
+pub struct Joined {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub room_id: Uuid,
+    pub room_info: Value,
+    pub tick: u64,
 }
 
 /// ハンドラ間で共有する登録簿。

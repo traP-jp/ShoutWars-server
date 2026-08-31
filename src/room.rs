@@ -1,7 +1,12 @@
 //! 部屋とユーザー (仕様 §3)。
 
-use std::{fmt, str::FromStr, time::Instant};
+use std::{
+    fmt,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
+use rmpv::Value;
 use serde::{Deserialize, Serialize, de};
 use uuid::Uuid;
 
@@ -78,7 +83,7 @@ impl<'de> Deserialize<'de> for RoomNumber {
 
 /// 部屋への 1 回の参加 (仕様 §3.3)。同一人物との対応は保証しない。
 #[derive(Debug)]
-#[expect(dead_code, reason = "join の実装で読む")]
+#[expect(dead_code, reason = "sync が room_users で返すまで読まない")]
 pub struct User {
     /// UUIDv7。参加順に増えるため、昇順に並べると先頭が部屋主になる (§3.4)。
     pub id: Uuid,
@@ -109,7 +114,6 @@ impl User {
 }
 
 #[derive(Debug)]
-#[expect(dead_code, reason = "join の実装で読む")]
 pub struct Room {
     pub id: Uuid,
     pub number: RoomNumber,
@@ -121,6 +125,8 @@ pub struct Room {
     pub started_at: Option<Instant>,
     /// ID 昇順。先頭が部屋主 (§3.4)。
     pub users: Vec<User>,
+    /// 遅延参加者へ渡す初期状態 (§2.9)。サーバーは中身を解釈しない (§1.2)。
+    pub info: Value,
 }
 
 impl Room {
@@ -150,6 +156,7 @@ impl Room {
             created_at: Instant::now(),
             started_at: None,
             users: vec![owner],
+            info: Value::Nil,
         })
     }
 
@@ -163,5 +170,15 @@ impl Room {
 
     pub fn is_expired(&self, config: &Config, now: Instant) -> bool {
         now >= self.deadline(config)
+    }
+
+    /// 現在の tick 番号 (§2.5)。窓 `N` は `[作成 + N × tick, 作成 + (N+1) × tick)`。
+    pub fn current_tick(&self, tick: Duration, now: Instant) -> u64 {
+        let elapsed = now.saturating_duration_since(self.created_at);
+        u64::try_from(elapsed.as_nanos() / tick.as_nanos()).unwrap_or(u64::MAX)
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.users.len() >= self.size
     }
 }
