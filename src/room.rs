@@ -363,6 +363,9 @@ impl Room {
     }
 
     /// 開いているレコードへイベントを預ける。
+    /// 同じ `type` の報告が重複していても、まとめてはならない。まとめてよいかどうかは
+    /// 「同じ `type` の報告は上書きされる」というゲームの意味を知っていて初めて決まり、
+    /// サーバーがそれを解釈しないという前提が崩れる。合流はクライアントが送信前に行う。
     pub fn deposit(&mut self, from: Uuid, reports: Vec<Event>, actions: Vec<Event>) {
         let pending = self.pending.entry(from).or_default();
         pending.reports.extend(reports);
