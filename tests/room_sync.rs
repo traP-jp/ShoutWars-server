@@ -41,7 +41,7 @@ struct UserName {
 #[derive(Debug, Serialize, Default)]
 struct Sync {
     session_id: String,
-    last_tick: u64,
+    next_tick: u64,
     applied: u64,
     reports: Vec<OutEvent>,
     actions: Vec<OutEvent>,
@@ -58,7 +58,7 @@ struct Status {
 #[derive(Debug, Serialize)]
 struct 申告なし {
     session_id: String,
-    last_tick: u64,
+    next_tick: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -84,7 +84,7 @@ struct Member {
 
 #[derive(Debug, Deserialize)]
 struct Synced {
-    tick: u64,
+    next_tick: u64,
     room_users: Vec<WireUser>,
     started: bool,
     reports: Vec<InEvent>,
@@ -152,10 +152,10 @@ async fn 参加する(server: &TestServer, number: &str, name: &str) -> Member {
         .msgpack()
 }
 
-fn 同期(session_id: &str, last_tick: u64) -> Sync {
+fn 同期(session_id: &str, next_tick: u64) -> Sync {
     Sync {
         session_id: session_id.to_owned(),
-        last_tick,
+        next_tick,
         ..Sync::default()
     }
 }
@@ -175,7 +175,10 @@ async fn 一人でも同期できる() {
 
     assert_eq!(reply.status, StatusCode::OK);
     let synced: Synced = reply.msgpack();
-    assert!(synced.tick >= 1, "必ず 1 件以上のレコードを返す (§2.11)");
+    assert!(
+        synced.next_tick >= 1,
+        "必ず 1 件以上のレコードを返す (§2.11)"
+    );
     assert_eq!(synced.room_users.len(), 1);
     assert_eq!(synced.room_users[0].id, alice.user_id);
     assert_eq!(synced.room_users[0].name, "Alice");
@@ -369,9 +372,9 @@ async fn 複数レコードがまとめて返る() {
     let synced: Synced = 送る(&server, &同期(&alice.session_id, 0)).await.msgpack();
 
     assert!(
-        synced.tick >= 3,
+        synced.next_tick >= 3,
         "3 窓ぶん以上が締め切られているはず: {}",
-        synced.tick
+        synced.next_tick
     );
 }
 
@@ -483,10 +486,10 @@ async fn 過去のレコードのイベントには番号が付く() {
     );
 }
 
-fn 申告(session_id: &str, last_tick: u64, applied: u64) -> Sync {
+fn 申告(session_id: &str, next_tick: u64, applied: u64) -> Sync {
     Sync {
         session_id: session_id.to_owned(),
-        last_tick,
+        next_tick,
         applied,
         ..Sync::default()
     }
@@ -506,7 +509,7 @@ async fn 申告が合っていれば異常としない() {
     assert!(!first.desync);
 
     // 1 件受け取ったので、次は applied = 1 を申告する。
-    let second: Synced = 送る(&server, &申告(&alice.session_id, first.tick, 1))
+    let second: Synced = 送る(&server, &申告(&alice.session_id, first.next_tick, 1))
         .await
         .msgpack();
 
@@ -525,7 +528,7 @@ async fn 申告がずれていれば検出する() {
     let first: Synced = 送る(&server, &first).await.msgpack();
 
     // 1 件配られたのに 99 件処理したと申告する。
-    let second: Synced = 送る(&server, &申告(&alice.session_id, first.tick, 99))
+    let second: Synced = 送る(&server, &申告(&alice.session_id, first.next_tick, 99))
         .await
         .msgpack();
 
@@ -569,7 +572,7 @@ async fn 申告が無い本文は拒む() {
             "/v3/room/sync",
             &申告なし {
                 session_id: alice.session_id.clone(),
-                last_tick: 0,
+                next_tick: 0,
             },
         )
         .send()
@@ -594,7 +597,7 @@ async fn 応答が途絶えたユーザーは外れる() {
         let synced: Synced = 送る(&server, &同期(&alice.session_id, cursor))
             .await
             .msgpack();
-        cursor = synced.tick;
+        cursor = synced.next_tick;
         users = synced.room_users;
         if users.len() == 1 {
             break;

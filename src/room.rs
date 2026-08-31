@@ -308,15 +308,15 @@ impl Room {
             .unwrap_or(0)
     }
 
-    /// `last_tick` の直前までに配った累計 (§2.10)。
+    /// `next_tick` の直前までに配った累計 (§2.10)。
     ///
-    /// クライアントは `last_tick` より前をすべて処理し終えているはずなので、
+    /// クライアントは `next_tick` より前をすべて処理し終えているはずなので、
     /// その件数が `applied` と一致する。
-    fn delivered_before_tick(&self, user: Uuid, last_tick: u64) -> u64 {
-        match self.closed.iter().find(|r| r.tick + 1 == last_tick) {
+    fn delivered_before_tick(&self, user: Uuid, next_tick: u64) -> u64 {
+        match self.closed.iter().find(|r| r.tick + 1 == next_tick) {
             Some(record) => record.delivered.get(&user).copied().unwrap_or(0),
             // 直前のレコードが保持期間から落ちている、または最初のレコードより前。
-            None if self.oldest_tick() == Some(last_tick) => {
+            None if self.oldest_tick() == Some(next_tick) => {
                 self.delivered_before.get(&user).copied().unwrap_or(0)
             }
             None => 0,
@@ -324,10 +324,10 @@ impl Room {
     }
 
     /// クライアントの申告と突き合わせる (§2.10)。一度でも食い違えば以後は立ったまま。
-    pub fn check_applied(&mut self, user: Uuid, last_tick: u64, applied: u64) {
-        let expected = self.delivered_before_tick(user, last_tick);
+    pub fn check_applied(&mut self, user: Uuid, next_tick: u64, applied: u64) {
+        let expected = self.delivered_before_tick(user, next_tick);
         if applied != expected {
-            tracing::warn!(%user, last_tick, applied, expected, "desync を検出しました");
+            tracing::warn!(%user, next_tick, applied, expected, "desync を検出しました");
             self.desync = true;
         }
     }
@@ -350,11 +350,11 @@ impl Room {
         self.closed.front().map(|record| record.tick)
     }
 
-    /// `last_tick` 以降の締め切り済みレコード (§2.6)。
-    pub fn records_from(&self, last_tick: u64) -> impl Iterator<Item = &Record> {
+    /// `next_tick` 以降の締め切り済みレコード (§2.6)。
+    pub fn records_from(&self, next_tick: u64) -> impl Iterator<Item = &Record> {
         self.closed
             .iter()
-            .filter(move |record| record.tick >= last_tick)
+            .filter(move |record| record.tick >= next_tick)
     }
 
     /// 開いているレコードへイベントを預ける。

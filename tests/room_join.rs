@@ -38,7 +38,7 @@ struct Joined {
     session_id: String,
     user_id: String,
     id: String,
-    tick: u64,
+    next_tick: u64,
     tick_ms: u64,
 }
 
@@ -212,8 +212,8 @@ async fn 参加時のtickは経過した窓の数() {
 
     // 100 ms 経過し 1 窓 20 ms なので 5 窓目以降。処理時間ぶん余裕を見る。
     assert!(
-        (5..10).contains(&joined.tick),
+        (5..10).contains(&joined.next_tick),
         "経過した窓の数と合いません: {}",
-        joined.tick
+        joined.next_tick
     );
 }

@@ -29,8 +29,8 @@ pub struct Response {
     user_id: Uuid,
     id: Uuid,
     name: RoomNumber,
-    /// 最初の同期で申告する `last_tick`。作成直後なので 0 から始まる (§2.6)。
-    tick: u64,
+    /// 最初の同期で申告するカーソル。作成直後なので 0 から始まる (§2.6)。
+    next_tick: u64,
     tick_ms: u64,
 }
 
@@ -48,7 +48,7 @@ pub async fn create(
         user_id,
         id: room.id,
         name: room.number,
-        tick: 0,
+        next_tick: 0,
         tick_ms: state.config.tick_ms(),
     }))
 }

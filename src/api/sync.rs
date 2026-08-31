@@ -28,7 +28,7 @@ const ROOM_INFO_LIMIT: usize = 64 * 1024;
 #[derive(Debug, Deserialize)]
 pub struct Request {
     session_id: Uuid,
-    last_tick: u64,
+    next_tick: u64,
     /// 受け取って処理したイベントの累計 (§2.10)。
     ///
     /// 既定値を持たせない。省略を 0 として扱うと、正常なクライアントが
@@ -45,8 +45,8 @@ pub struct Request {
 
 #[derive(Debug, Serialize)]
 pub struct Response {
-    /// 次回申告する `last_tick` (§2.6)。
-    tick: u64,
+    /// 次のリクエストにそのまま入れる値 (§2.6)。
+    next_tick: u64,
     room_users: Vec<WireUser>,
     started: bool,
     reports: Vec<WireEvent>,
@@ -86,10 +86,10 @@ impl WireEvent {
 }
 
 impl Response {
-    /// `last_tick` 以降のレコードをまとめる。少なくとも 1 件あることが前提 (§2.11)。
-    fn build(room: &Room, user: Uuid, last_tick: u64) -> Self {
+    /// `next_tick` 以降のレコードをまとめる。少なくとも 1 件あることが前提 (§2.11)。
+    fn build(room: &Room, user: Uuid, next_tick: u64) -> Self {
         let desync = room.is_desynced();
-        let records: Vec<&Record> = room.records_from(last_tick).collect();
+        let records: Vec<&Record> = room.records_from(next_tick).collect();
         let last = records
             .last()
             .expect("返せるレコードがあると判定された後に呼ばれる");
@@ -117,7 +117,7 @@ impl Response {
         }
 
         Self {
-            tick: final_tick + 1,
+            next_tick: final_tick + 1,
             room_users: users
                 .into_iter()
                 .map(|user| WireUser {
@@ -146,7 +146,7 @@ pub async fn sync(
     if let Some(info) = &request.room_info {
         check_size("room_info", info, ROOM_INFO_LIMIT)?;
     }
-    let (session_id, last_tick) = (request.session_id, request.last_tick);
+    let (session_id, next_tick) = (request.session_id, request.next_tick);
 
     // イベントを預けるのは最初の 1 回だけ。待ち直しても二重に溜まらないようにする。
     // 送信者 ID はセッションを引いた後でなければ分からないため、ここでは埋めない。
@@ -162,12 +162,12 @@ pub async fn sync(
             let mut rooms = state.rooms.lock();
             match rooms.sync(SyncRequest {
                 session_id,
-                last_tick,
+                next_tick,
                 deposit: deposit.take(),
             })? {
                 Sync::Ready(user) => {
                     let room = rooms.room_of(session_id)?;
-                    return Ok(MsgPack(Response::build(room, user, last_tick)));
+                    return Ok(MsgPack(Response::build(room, user, next_tick)));
                 }
                 Sync::Wait { deadline, closed } => (deadline, closed),
             }

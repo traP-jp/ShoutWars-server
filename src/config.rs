@@ -13,7 +13,7 @@ pub struct Config {
     /// tick の幅 (仕様 §2.5)。参加時の応答で `tick_ms` として通知する。
     pub tick: Duration,
     /// 部屋ごとに保持する同期レコードの数 (仕様 §2.6)。
-    /// これより古い `last_tick` は追いつけない。
+    /// これより古い `next_tick` は追いつけない。
     pub record_retention: usize,
 }
 

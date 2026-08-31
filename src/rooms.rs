@@ -114,7 +114,7 @@ impl Rooms {
             user_id: user.id,
             room_id: room.id,
             room_info: room.info.clone(),
-            tick: room.open_tick(),
+            next_tick: room.open_tick(),
         };
         self.sessions.insert(
             user.session_id,
@@ -182,7 +182,7 @@ impl Rooms {
     /// 締め切りの通知を待って、もう一度呼ぶ。イベントは最初の 1 回だけ預ける。
     ///
     /// # Errors
-    /// セッションが無効、二重同期、保持期間外の `last_tick` などの場合。
+    /// セッションが無効、二重同期、保持期間外の `next_tick` などの場合。
     pub fn sync(&mut self, request: SyncRequest) -> Result<Sync, Error> {
         self.sweep();
         let session = *self
@@ -206,14 +206,14 @@ impl Rooms {
             if room.has_deposited(session.user) {
                 return Err(Error::AlreadySynced);
             }
-            if request.last_tick > room.open_tick() {
+            if request.next_tick > room.open_tick() {
                 return Err(Error::BadRequest(
-                    "last_tick が未来のレコードを指しています。".to_owned(),
+                    "next_tick が未来のレコードを指しています。".to_owned(),
                 ));
             }
             if room
                 .oldest_tick()
-                .is_some_and(|oldest| request.last_tick < oldest)
+                .is_some_and(|oldest| request.next_tick < oldest)
             {
                 return Err(Error::SyncTooOld);
             }
@@ -226,7 +226,7 @@ impl Rooms {
                     .map(|event| event.sent_by(session.user))
                     .collect()
             };
-            room.check_applied(session.user, request.last_tick, deposit.applied);
+            room.check_applied(session.user, request.next_tick, deposit.applied);
             room.deposit(
                 session.user,
                 attach(deposit.reports),
@@ -238,7 +238,7 @@ impl Rooms {
             }
         }
 
-        if room.records_from(request.last_tick).next().is_some() {
+        if room.records_from(request.next_tick).next().is_some() {
             return Ok(Sync::Ready(session.user));
         }
         Ok(Sync::Wait {
@@ -272,7 +272,7 @@ impl Rooms {
 #[derive(Debug)]
 pub struct SyncRequest {
     pub session_id: Uuid,
-    pub last_tick: u64,
+    pub next_tick: u64,
     /// 2 回目以降の呼び出しでは `None`。イベントを二重に預けないため。
     pub deposit: Option<Deposit>,
 }
@@ -303,7 +303,7 @@ pub struct Joined {
     pub user_id: Uuid,
     pub room_id: Uuid,
     pub room_info: Value,
-    pub tick: u64,
+    pub next_tick: u64,
 }
 
 /// ハンドラ間で共有する登録簿。

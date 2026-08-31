@@ -25,8 +25,8 @@ pub struct Response {
     user_id: Uuid,
     id: Uuid,
     room_info: Value,
-    /// 最初の同期で申告する `last_tick` (§2.6)。
-    tick: u64,
+    /// 最初の同期で申告するカーソル (§2.6)。
+    next_tick: u64,
     tick_ms: u64,
 }
 
@@ -41,7 +41,7 @@ pub async fn join(
         user_id: joined.user_id,
         id: joined.room_id,
         room_info: joined.room_info,
-        tick: joined.tick,
+        next_tick: joined.next_tick,
         tick_ms: state.config.tick_ms(),
     }))
 }

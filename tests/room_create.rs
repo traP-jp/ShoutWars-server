@@ -27,7 +27,7 @@ struct Created {
     user_id: String,
     id: String,
     name: String,
-    tick: u64,
+    next_tick: u64,
     tick_ms: u64,
 }
 
@@ -62,7 +62,7 @@ async fn 部屋を作れる() {
             "{label} が UUID の文字列ではありません: {text}"
         );
     }
-    assert_eq!(created.tick, 0, "作成直後は 0 から受け取る");
+    assert_eq!(created.next_tick, 0, "作成直後は 0 から受け取る");
 }
 
 #[tokio::test]
