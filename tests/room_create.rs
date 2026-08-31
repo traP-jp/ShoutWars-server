@@ -31,7 +31,7 @@ struct Created {
     tick_ms: u64,
 }
 
-fn 部屋を作る(name: &str, size: usize) -> Request {
+fn create_request(name: &str, size: usize) -> Request {
     Request {
         version: "1.0".to_owned(),
         user: UserName {
@@ -42,11 +42,11 @@ fn 部屋を作る(name: &str, size: usize) -> Request {
 }
 
 #[tokio::test]
-async fn 部屋を作れる() {
+async fn creates_a_room() {
     let server = TestServer::start().await;
 
     let reply = server
-        .post("/v3/room/create", &部屋を作る("Alice", 2))
+        .post("/v3/room/create", &create_request("Alice", 2))
         .send()
         .await;
 
@@ -66,11 +66,11 @@ async fn 部屋を作れる() {
 }
 
 #[tokio::test]
-async fn 部屋番号は六桁の数字() {
+async fn room_number_is_six_digits() {
     let server = TestServer::start().await;
 
     let created: Created = server
-        .post("/v3/room/create", &部屋を作る("Alice", 2))
+        .post("/v3/room/create", &create_request("Alice", 2))
         .send()
         .await
         .msgpack();
@@ -89,13 +89,13 @@ async fn 部屋番号は六桁の数字() {
 }
 
 #[tokio::test]
-async fn 部屋番号は重複しない() {
+async fn room_numbers_do_not_collide() {
     let server = TestServer::start().await;
 
     let mut numbers = Vec::new();
     for _ in 0..20 {
         let created: Created = server
-            .post("/v3/room/create", &部屋を作る("Alice", 2))
+            .post("/v3/room/create", &create_request("Alice", 2))
             .send()
             .await
             .msgpack();
@@ -109,7 +109,7 @@ async fn 部屋番号は重複しない() {
 }
 
 #[tokio::test]
-async fn tick_msは設定を伝える() {
+async fn tick_ms_reflects_config() {
     let Some(server) = TestServer::with_config(Config {
         tick: std::time::Duration::from_millis(5),
         ..Config::default()
@@ -120,7 +120,7 @@ async fn tick_msは設定を伝える() {
     };
 
     let created: Created = server
-        .post("/v3/room/create", &部屋を作る("Alice", 2))
+        .post("/v3/room/create", &create_request("Alice", 2))
         .send()
         .await
         .msgpack();
@@ -129,12 +129,12 @@ async fn tick_msは設定を伝える() {
 }
 
 #[tokio::test]
-async fn 部屋数に反映される() {
+async fn room_count_increases() {
     let server = TestServer::start().await;
 
     let before: Status = server.get("/v3/status").send().await.msgpack();
     server
-        .post("/v3/room/create", &部屋を作る("Alice", 2))
+        .post("/v3/room/create", &create_request("Alice", 2))
         .send()
         .await;
     let after: Status = server.get("/v3/status").send().await.msgpack();
@@ -148,12 +148,12 @@ struct Status {
 }
 
 #[tokio::test]
-async fn 人数が範囲外なら拒む() {
+async fn rejects_a_size_out_of_range() {
     let server = TestServer::start().await;
 
     for size in [0, 1, 5, 100] {
         let reply = server
-            .post("/v3/room/create", &部屋を作る("Alice", size))
+            .post("/v3/room/create", &create_request("Alice", size))
             .send()
             .await;
 
@@ -163,11 +163,11 @@ async fn 人数が範囲外なら拒む() {
 }
 
 #[tokio::test]
-async fn 長すぎるユーザー名は拒む() {
+async fn rejects_a_too_long_user_name() {
     let server = TestServer::start().await;
 
     let reply = server
-        .post("/v3/room/create", &部屋を作る(&"あ".repeat(33), 2))
+        .post("/v3/room/create", &create_request(&"あ".repeat(33), 2))
         .send()
         .await;
 
@@ -176,11 +176,11 @@ async fn 長すぎるユーザー名は拒む() {
 }
 
 #[tokio::test]
-async fn 上限ちょうどのユーザー名は通る() {
+async fn accepts_a_user_name_at_the_limit() {
     let server = TestServer::start().await;
 
     let reply = server
-        .post("/v3/room/create", &部屋を作る(&"あ".repeat(32), 2))
+        .post("/v3/room/create", &create_request(&"あ".repeat(32), 2))
         .send()
         .await;
 
@@ -188,7 +188,7 @@ async fn 上限ちょうどのユーザー名は通る() {
 }
 
 #[tokio::test]
-async fn 部屋数の上限に達したら拒む() {
+async fn rejects_when_the_room_limit_is_reached() {
     let Some(server) = TestServer::with_config(Config {
         room_limit: 2,
         ..Config::default()
@@ -200,14 +200,14 @@ async fn 部屋数の上限に達したら拒む() {
 
     for _ in 0..2 {
         let reply = server
-            .post("/v3/room/create", &部屋を作る("Alice", 2))
+            .post("/v3/room/create", &create_request("Alice", 2))
             .send()
             .await;
         assert_eq!(reply.status, StatusCode::OK);
     }
 
     let reply = server
-        .post("/v3/room/create", &部屋を作る("Alice", 2))
+        .post("/v3/room/create", &create_request("Alice", 2))
         .send()
         .await;
 
@@ -216,7 +216,7 @@ async fn 部屋数の上限に達したら拒む() {
 }
 
 #[tokio::test]
-async fn 形式が違う本文は拒む() {
+async fn rejects_a_malformed_body() {
     let server = TestServer::start().await;
 
     let reply = server
@@ -229,7 +229,7 @@ async fn 形式が違う本文は拒む() {
 }
 
 #[tokio::test]
-async fn 期限切れの部屋は数えない() {
+async fn does_not_count_expired_rooms() {
     let Some(server) = TestServer::with_config(Config {
         lobby_lifetime: std::time::Duration::from_millis(50),
         ..Config::default()
@@ -240,7 +240,7 @@ async fn 期限切れの部屋は数えない() {
     };
 
     server
-        .post("/v3/room/create", &部屋を作る("Alice", 2))
+        .post("/v3/room/create", &create_request("Alice", 2))
         .send()
         .await;
     tokio::time::sleep(std::time::Duration::from_millis(80)).await;

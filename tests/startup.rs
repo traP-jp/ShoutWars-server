@@ -5,7 +5,7 @@
 
 use std::process::Command;
 
-fn 起動を試す(name: &str, value: &str) -> (Option<i32>, String) {
+fn try_start(name: &str, value: &str) -> (Option<i32>, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_shoutwars-server"))
         .env(name, value)
         .output()
@@ -16,9 +16,9 @@ fn 起動を試す(name: &str, value: &str) -> (Option<i32>, String) {
     )
 }
 
-fn 起動しないことを確かめる(cases: &[(&str, &str)]) {
+fn assert_refuses_to_start(cases: &[(&str, &str)]) {
     for (name, value) in cases {
-        let (code, stderr) = 起動を試す(name, value);
+        let (code, stderr) = try_start(name, value);
         assert_eq!(code, Some(1), "{name}={value} で起動してしまいました");
         assert!(
             stderr.contains(name),
@@ -28,8 +28,8 @@ fn 起動しないことを確かめる(cases: &[(&str, &str)]) {
 }
 
 #[test]
-fn 解釈できない値では起動しない() {
-    起動しないことを確かめる(&[
+fn refuses_to_start_on_unparsable_value() {
+    assert_refuses_to_start(&[
         ("PORT", "ななよんろくはち"),
         ("ROOM_LIMIT", "abc"),
         ("TICK_MS", "1.5"),
@@ -38,8 +38,8 @@ fn 解釈できない値では起動しない() {
 }
 
 #[test]
-fn 範囲外の値では起動しない() {
-    起動しないことを確かめる(&[
+fn refuses_to_start_on_out_of_range_value() {
+    assert_refuses_to_start(&[
         ("ROOM_LIMIT", "0"),
         ("TICK_MS", "0"),
         ("RECORD_RETENTION", "0"),

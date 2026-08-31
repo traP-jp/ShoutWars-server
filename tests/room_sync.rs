@@ -11,7 +11,7 @@ use shoutwars_server::config::Config;
 use uuid::Uuid;
 
 /// テストは実時間を待つため、tick を仕様の 100 ms より大幅に短くする。
-fn 設定() -> Config {
+fn config() -> Config {
     Config {
         tick: Duration::from_millis(50),
         record_retention: 5,
@@ -56,7 +56,7 @@ struct Status {
 
 /// `applied` を欠いた本文。
 #[derive(Debug, Serialize)]
-struct 申告なし {
+struct BodyWithoutApplied {
     session_id: String,
     next_tick: u64,
 }
@@ -110,7 +110,7 @@ struct InEvent {
     data: String,
 }
 
-fn イベント(kind: &str, data: &str) -> OutEvent {
+fn event(kind: &str, data: &str) -> OutEvent {
     OutEvent {
         id: Uuid::now_v7().to_string(),
         kind: kind.to_owned(),
@@ -118,7 +118,7 @@ fn イベント(kind: &str, data: &str) -> OutEvent {
     }
 }
 
-async fn 部屋を作る(server: &TestServer, size: usize) -> Member {
+async fn create_room(server: &TestServer, size: usize) -> Member {
     server
         .post(
             "/v3/room/create",
@@ -135,7 +135,7 @@ async fn 部屋を作る(server: &TestServer, size: usize) -> Member {
         .msgpack()
 }
 
-async fn 参加する(server: &TestServer, number: &str, name: &str) -> Member {
+async fn join_room(server: &TestServer, number: &str, name: &str) -> Member {
     server
         .post(
             "/v3/room/join",
@@ -152,7 +152,7 @@ async fn 参加する(server: &TestServer, number: &str, name: &str) -> Member {
         .msgpack()
 }
 
-fn 同期(session_id: &str, next_tick: u64) -> Sync {
+fn sync_request(session_id: &str, next_tick: u64) -> Sync {
     Sync {
         session_id: session_id.to_owned(),
         next_tick,
@@ -160,18 +160,18 @@ fn 同期(session_id: &str, next_tick: u64) -> Sync {
     }
 }
 
-async fn 送る(server: &TestServer, body: &Sync) -> Reply {
+async fn post_sync(server: &TestServer, body: &Sync) -> Reply {
     server.post("/v3/room/sync", body).send().await
 }
 
 #[tokio::test]
-async fn 一人でも同期できる() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn syncs_with_a_single_user() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let reply = 送る(&server, &同期(&alice.session_id, 0)).await;
+    let reply = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
 
     assert_eq!(reply.status, StatusCode::OK);
     let synced: Synced = reply.msgpack();
@@ -181,22 +181,22 @@ async fn 一人でも同期できる() {
     assert_eq!(synced.room_users[0].name, "Alice");
     assert!(
         !synced.room_users[0].absent,
-        "同期した本人が不在になっています"
+        "sync_requestした本人が不在になっています"
     );
     assert!(!synced.started);
     assert!(!synced.desync);
 }
 
 #[tokio::test]
-async fn 確認イベントは送信者にも返る() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn actions_are_echoed_to_the_sender() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let mut body = 同期(&alice.session_id, 0);
-    body.actions = vec![イベント("attack", "えい")];
-    let synced: Synced = 送る(&server, &body).await.msgpack();
+    let mut body = sync_request(&alice.session_id, 0);
+    body.actions = vec![event("attack", "えい")];
+    let synced: Synced = post_sync(&server, &body).await.msgpack();
 
     assert_eq!(synced.actions.len(), 1, "送信者にも返る");
     assert_eq!(synced.actions[0].kind, "attack");
@@ -208,37 +208,39 @@ async fn 確認イベントは送信者にも返る() {
 }
 
 #[tokio::test]
-async fn 報告イベントは送信者に返らない() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn reports_are_not_echoed_to_the_sender() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let mut body = 同期(&alice.session_id, 0);
-    body.reports = vec![イベント("position", "3,4")];
-    let synced: Synced = 送る(&server, &body).await.msgpack();
+    let mut body = sync_request(&alice.session_id, 0);
+    body.reports = vec![event("position", "3,4")];
+    let synced: Synced = post_sync(&server, &body).await.msgpack();
 
     assert!(synced.reports.is_empty(), "送信者には返さない");
 }
 
 #[tokio::test]
-async fn 相手の報告は届く() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn reports_reach_the_other_users() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
-    let bob = 参加する(&server, &alice.name(), "Bob").await;
+    let alice = create_room(&server, 2).await;
+    let bob = join_room(&server, &alice.name(), "Bob").await;
 
-    let mut body = 同期(&bob.session_id, 0);
-    body.reports = vec![イベント("position", "3,4")];
+    let mut body = sync_request(&bob.session_id, 0);
+    body.reports = vec![event("position", "3,4")];
     let bob_reply = tokio::spawn({
         let server = server.clone();
-        async move { 送る(&server, &body).await }
+        async move { post_sync(&server, &body).await }
     });
     // Bob の預け入れが先に届くようにする。同じレコードに入れば全員到着で締め切られる。
     tokio::time::sleep(Duration::from_millis(10)).await;
-    let alice_synced: Synced = 送る(&server, &同期(&alice.session_id, 0)).await.msgpack();
-    bob_reply.await.expect("Bob の同期が終わりません");
+    let alice_synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
+        .await
+        .msgpack();
+    bob_reply.await.expect("Bob のsync_requestが終わりません");
 
     assert_eq!(alice_synced.reports.len(), 1);
     assert_eq!(alice_synced.reports[0].from, bob.user_id);
@@ -246,45 +248,45 @@ async fn 相手の報告は届く() {
 }
 
 #[tokio::test]
-async fn 二重の同期は拒む() {
-    // 窓を長く取り、1 本目が確実に届いてから 2 本目を送る。
+async fn rejects_a_double_sync() {
+    // 窓を長く取り、1 本目が確実に届いてから 2 本目をpost_sync。
     let Some(server) = TestServer::with_config(Config {
         tick: Duration::from_millis(500),
-        ..設定()
+        ..config()
     })
     .await
     else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
-    参加する(&server, &alice.name(), "Bob").await;
+    let alice = create_room(&server, 2).await;
+    join_room(&server, &alice.name(), "Bob").await;
 
-    // 相手が来ないので締め切りまで待つ。その間にもう一度送る。
+    // 相手が来ないので締め切りまで待つ。その間にもう一度post_sync。
     let first = tokio::spawn({
         let server = server.clone();
-        let body = 同期(&alice.session_id, 0);
-        async move { 送る(&server, &body).await }
+        let body = sync_request(&alice.session_id, 0);
+        async move { post_sync(&server, &body).await }
     });
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let second = 送る(&server, &同期(&alice.session_id, 0)).await;
-    first.await.expect("最初の同期が終わりません");
+    let second = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
+    first.await.expect("最初のsync_requestが終わりません");
 
     assert_eq!(second.status, StatusCode::FORBIDDEN);
     assert_eq!(second.error_code(), "already_synced");
 }
 
 #[tokio::test]
-async fn 古すぎるカーソルは拒む() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn rejects_a_cursor_that_is_too_old() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    // 同期は続けるがカーソルを進めないクライアント。応答はあるので脱落はしないが、
-    // 保持しているレコードから振り切られる。一人の部屋なので 1 回の同期で 1 tick 進む。
+    // sync_requestは続けるがカーソルを進めないクライアント。応答はあるので脱落はしないが、
+    // 保持しているレコードから振り切られる。一人の部屋なので 1 回のsync_requestで 1 tick 進む。
     let mut last = None;
     for _ in 0..8 {
-        let reply = 送る(&server, &同期(&alice.session_id, 0)).await;
+        let reply = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
         if reply.status != StatusCode::OK {
             last = Some(reply);
             break;
@@ -297,52 +299,52 @@ async fn 古すぎるカーソルは拒む() {
 }
 
 #[tokio::test]
-async fn 未来のカーソルは拒む() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn rejects_a_cursor_in_the_future() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let reply = 送る(&server, &同期(&alice.session_id, 9999)).await;
+    let reply = post_sync(&server, &sync_request(&alice.session_id, 9999)).await;
 
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
     assert_eq!(reply.error_code(), "bad_request");
 }
 
 #[tokio::test]
-async fn 無効なセッションは拒む() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn rejects_an_invalid_session() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    部屋を作る(&server, 2).await;
+    create_room(&server, 2).await;
 
-    let reply = 送る(&server, &同期(&Uuid::new_v4().to_string(), 0)).await;
+    let reply = post_sync(&server, &sync_request(&Uuid::new_v4().to_string(), 0)).await;
 
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
     assert_eq!(reply.error_code(), "invalid_session");
 }
 
 #[tokio::test]
-async fn 件数の上限を超えたら拒む() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn rejects_too_many_events() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let mut body = 同期(&alice.session_id, 0);
-    body.actions = (0..65).map(|_| イベント("spam", "x")).collect();
-    let reply = 送る(&server, &body).await;
+    let mut body = sync_request(&alice.session_id, 0);
+    body.actions = (0..65).map(|_| event("spam", "x")).collect();
+    let reply = post_sync(&server, &body).await;
 
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
     assert_eq!(reply.error_code(), "limit_exceeded");
 }
 
 #[tokio::test]
-async fn 開始は同期の応答に現れる() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn the_start_appears_in_the_response() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
     server
         .post(
@@ -353,20 +355,24 @@ async fn 開始は同期の応答に現れる() {
         )
         .send()
         .await;
-    let synced: Synced = 送る(&server, &同期(&alice.session_id, 0)).await.msgpack();
+    let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
+        .await
+        .msgpack();
 
     assert!(synced.started, "開始が伝わっていません");
 }
 
 #[tokio::test]
-async fn 複数レコードがまとめて返る() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn returns_several_records_at_once() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
     tokio::time::sleep(Duration::from_millis(170)).await;
 
-    let synced: Synced = 送る(&server, &同期(&alice.session_id, 0)).await.msgpack();
+    let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
+        .await
+        .msgpack();
 
     assert!(
         synced.next_tick >= 3,
@@ -375,16 +381,16 @@ async fn 複数レコードがまとめて返る() {
     );
 }
 
-async fn 部屋情報を送る(server: &TestServer, session_id: &str, info: &str) {
-    let mut body = 同期(session_id, 0);
+async fn send_room_info(server: &TestServer, session_id: &str, info: &str) {
+    let mut body = sync_request(session_id, 0);
     body.room_info = Some(info.to_owned());
     let server = server.clone();
-    tokio::spawn(async move { 送る(&server, &body).await });
+    tokio::spawn(async move { post_sync(&server, &body).await });
     // 締め切りを跨がせる。反映はレコードの締め切り時である。
     tokio::time::sleep(Duration::from_millis(120)).await;
 }
 
-async fn 部屋情報を見る(server: &TestServer, number: &str, name: &str) -> Option<String> {
+async fn read_room_info(server: &TestServer, number: &str, name: &str) -> Option<String> {
     let joined: RoomInfoOnly = server
         .post(
             "/v3/room/join",
@@ -403,16 +409,16 @@ async fn 部屋情報を見る(server: &TestServer, number: &str, name: &str) ->
 }
 
 #[tokio::test]
-async fn 部屋主は部屋情報を更新できる() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn the_owner_can_update_room_info() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 4).await;
+    let alice = create_room(&server, 4).await;
 
-    部屋情報を送る(&server, &alice.session_id, "ステージ 2").await;
+    send_room_info(&server, &alice.session_id, "ステージ 2").await;
 
     assert_eq!(
-        部屋情報を見る(&server, &alice.name(), "Bob")
+        read_room_info(&server, &alice.name(), "Bob")
             .await
             .as_deref(),
         Some("ステージ 2")
@@ -420,17 +426,17 @@ async fn 部屋主は部屋情報を更新できる() {
 }
 
 #[tokio::test]
-async fn 部屋主以外の部屋情報は無視する() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn ignores_room_info_from_others() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 4).await;
-    let bob = 参加する(&server, &alice.name(), "Bob").await;
+    let alice = create_room(&server, 4).await;
+    let bob = join_room(&server, &alice.name(), "Bob").await;
 
-    部屋情報を送る(&server, &bob.session_id, "Bob の設定").await;
+    send_room_info(&server, &bob.session_id, "Bob のconfig").await;
 
     assert_eq!(
-        部屋情報を見る(&server, &alice.name(), "Charlie").await,
+        read_room_info(&server, &alice.name(), "Charlie").await,
         None,
         "部屋主以外の更新が通りました"
     );
@@ -448,29 +454,29 @@ impl Member {
 }
 
 #[tokio::test]
-async fn 過去のレコードのイベントには番号が付く() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn events_from_older_records_carry_a_tick() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
     // 一人だけの部屋では、預けた時点で全員到着となり即座に締め切られる。
-    let mut first = 同期(&alice.session_id, 0);
-    let 先のid = Uuid::now_v7().to_string();
+    let mut first = sync_request(&alice.session_id, 0);
+    let first_id = Uuid::now_v7().to_string();
     first.actions = vec![OutEvent {
-        id: 先のid.clone(),
+        id: first_id.clone(),
         kind: "attack".to_owned(),
         data: "A".to_owned(),
     }];
-    送る(&server, &first).await;
+    post_sync(&server, &first).await;
 
-    let mut second = 同期(&alice.session_id, 0);
-    second.actions = vec![イベント("attack", "B")];
-    let synced: Synced = 送る(&server, &second).await.msgpack();
+    let mut second = sync_request(&alice.session_id, 0);
+    second.actions = vec![event("attack", "B")];
+    let synced: Synced = post_sync(&server, &second).await.msgpack();
 
     assert_eq!(synced.actions.len(), 2, "2 レコードぶんがまとまって返る");
     assert_eq!(synced.actions[0].data, "A");
-    assert_eq!(synced.actions[0].id, 先のid, "イベント ID はそのまま返る");
+    assert_eq!(synced.actions[0].id, first_id, "event ID はそのまま返る");
     assert_eq!(
         synced.actions[0].tick,
         Some(0),
@@ -479,11 +485,11 @@ async fn 過去のレコードのイベントには番号が付く() {
     assert_eq!(synced.actions[1].data, "B");
     assert_eq!(
         synced.actions[1].tick, None,
-        "最後のレコードのイベントには番号を付けない"
+        "最後のレコードのeventには番号を付けない"
     );
 }
 
-fn 申告(session_id: &str, next_tick: u64, applied: u64) -> Sync {
+fn sync_request_with_applied(session_id: &str, next_tick: u64, applied: u64) -> Sync {
     Sync {
         session_id: session_id.to_owned(),
         next_tick,
@@ -493,63 +499,73 @@ fn 申告(session_id: &str, next_tick: u64, applied: u64) -> Sync {
 }
 
 #[tokio::test]
-async fn 申告が合っていれば異常としない() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn accepts_a_matching_applied_count() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let mut first = 申告(&alice.session_id, 0, 0);
-    first.actions = vec![イベント("attack", "A")];
-    let first: Synced = 送る(&server, &first).await.msgpack();
+    let mut first = sync_request_with_applied(&alice.session_id, 0, 0);
+    first.actions = vec![event("attack", "A")];
+    let first: Synced = post_sync(&server, &first).await.msgpack();
     assert_eq!(first.actions.len(), 1);
     assert!(!first.desync);
 
-    // 1 件受け取ったので、次は applied = 1 を申告する。
-    let second: Synced = 送る(&server, &申告(&alice.session_id, first.next_tick, 1))
-        .await
-        .msgpack();
+    // 1 件受け取ったので、次は applied = 1 をsync_request_with_appliedする。
+    let second: Synced = post_sync(
+        &server,
+        &sync_request_with_applied(&alice.session_id, first.next_tick, 1),
+    )
+    .await
+    .msgpack();
 
-    assert!(!second.desync, "正しい申告で desync と判定されました");
+    assert!(
+        !second.desync,
+        "正しいsync_request_with_appliedで desync と判定されました"
+    );
 }
 
 #[tokio::test]
-async fn 申告がずれていれば検出する() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn detects_a_mismatched_applied_count() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let mut first = 申告(&alice.session_id, 0, 0);
-    first.actions = vec![イベント("attack", "A")];
-    let first: Synced = 送る(&server, &first).await.msgpack();
+    let mut first = sync_request_with_applied(&alice.session_id, 0, 0);
+    first.actions = vec![event("attack", "A")];
+    let first: Synced = post_sync(&server, &first).await.msgpack();
 
-    // 1 件配られたのに 99 件処理したと申告する。
-    let second: Synced = 送る(&server, &申告(&alice.session_id, first.next_tick, 99))
-        .await
-        .msgpack();
+    // 1 件配られたのに 99 件処理したとsync_request_with_appliedする。
+    let second: Synced = post_sync(
+        &server,
+        &sync_request_with_applied(&alice.session_id, first.next_tick, 99),
+    )
+    .await
+    .msgpack();
 
     assert!(second.desync, "食い違いを検出できていません");
 }
 
 #[tokio::test]
-async fn 検出したら全員に伝える() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn reports_desync_to_everyone() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
-    let bob = 参加する(&server, &alice.name(), "Bob").await;
+    let alice = create_room(&server, 2).await;
+    let bob = join_room(&server, &alice.name(), "Bob").await;
 
     let bob_reply = tokio::spawn({
         let server = server.clone();
-        let body = 申告(&bob.session_id, 0, 42);
-        async move { 送る(&server, &body).await }
+        let body = sync_request_with_applied(&bob.session_id, 0, 42);
+        async move { post_sync(&server, &body).await }
     });
     tokio::time::sleep(Duration::from_millis(10)).await;
-    let alice_synced: Synced = 送る(&server, &申告(&alice.session_id, 0, 0))
-        .await
-        .msgpack();
-    bob_reply.await.expect("Bob の同期が終わりません");
+    let alice_synced: Synced =
+        post_sync(&server, &sync_request_with_applied(&alice.session_id, 0, 0))
+            .await
+            .msgpack();
+    bob_reply.await.expect("Bob のsync_requestが終わりません");
 
     assert!(
         alice_synced.desync,
@@ -558,16 +574,16 @@ async fn 検出したら全員に伝える() {
 }
 
 #[tokio::test]
-async fn 申告が無い本文は拒む() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn rejects_a_body_without_applied() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
     let reply = server
         .post(
             "/v3/room/sync",
-            &申告なし {
+            &BodyWithoutApplied {
                 session_id: alice.session_id.clone(),
                 next_tick: 0,
             },
@@ -580,18 +596,18 @@ async fn 申告が無い本文は拒む() {
 }
 
 #[tokio::test]
-async fn 応答が途絶えたユーザーは外れる() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn drops_users_that_stop_responding() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
-    let bob = 参加する(&server, &alice.name(), "Bob").await;
+    let alice = create_room(&server, 2).await;
+    let bob = join_room(&server, &alice.name(), "Bob").await;
 
-    // Bob は一度も同期しない。保持数を超えて応答が無ければ部屋から外れる。
+    // Bob は一度もsync_requestしない。保持数を超えて応答が無ければ部屋から外れる。
     let mut users = Vec::new();
     let mut cursor = 0;
     for _ in 0..8 {
-        let synced: Synced = 送る(&server, &同期(&alice.session_id, cursor))
+        let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, cursor))
             .await
             .msgpack();
         cursor = synced.next_tick;
@@ -605,21 +621,23 @@ async fn 応答が途絶えたユーザーは外れる() {
     assert_eq!(users[0].name, "Alice");
 
     // 外れたユーザーのセッションは無効になる。
-    let reply = 送る(&server, &同期(&bob.session_id, 0)).await;
+    let reply = post_sync(&server, &sync_request(&bob.session_id, 0)).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
     assert_eq!(reply.error_code(), "invalid_session");
 }
 
 #[tokio::test]
-async fn 間に合わなかったユーザーは不在になる() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn marks_late_users_as_absent() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
-    参加する(&server, &alice.name(), "Bob").await;
+    let alice = create_room(&server, 2).await;
+    join_room(&server, &alice.name(), "Bob").await;
 
     // Bob が来ないので、最初のレコードは期限で締め切られる。
-    let synced: Synced = 送る(&server, &同期(&alice.session_id, 0)).await.msgpack();
+    let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
+        .await
+        .msgpack();
 
     let bob = synced
         .room_users
@@ -636,66 +654,66 @@ async fn 間に合わなかったユーザーは不在になる() {
 }
 
 #[tokio::test]
-async fn 大きすぎるデータは拒む() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn rejects_oversized_data() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let mut body = 同期(&alice.session_id, 0);
+    let mut body = sync_request(&alice.session_id, 0);
     body.actions = vec![OutEvent {
         id: Uuid::now_v7().to_string(),
         kind: "attack".to_owned(),
         data: "あ".repeat(8 * 1024),
     }];
-    let reply = 送る(&server, &body).await;
+    let reply = post_sync(&server, &body).await;
 
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
     assert_eq!(reply.error_code(), "limit_exceeded");
 }
 
 #[tokio::test]
-async fn 上限内のデータは通る() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn accepts_data_at_the_limit() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let mut body = 同期(&alice.session_id, 0);
+    let mut body = sync_request(&alice.session_id, 0);
     body.actions = vec![OutEvent {
         id: Uuid::now_v7().to_string(),
         kind: "attack".to_owned(),
         // 文字列の符号化には長さの分も乗るため、上限より少し小さく取る。
         data: "a".repeat(8 * 1024 - 8),
     }];
-    let reply = 送る(&server, &body).await;
+    let reply = post_sync(&server, &body).await;
 
     assert_eq!(reply.status, StatusCode::OK);
 }
 
 #[tokio::test]
-async fn 大きすぎる部屋情報は拒む() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn rejects_oversized_room_info() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let mut body = 同期(&alice.session_id, 0);
+    let mut body = sync_request(&alice.session_id, 0);
     body.room_info = Some("あ".repeat(64 * 1024));
-    let reply = 送る(&server, &body).await;
+    let reply = post_sync(&server, &body).await;
 
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
     assert_eq!(reply.error_code(), "limit_exceeded");
 }
 
 #[tokio::test]
-async fn 本文が大きすぎれば読まずに拒む() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn rejects_an_oversized_body() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    let mut body = 同期(&alice.session_id, 0);
+    let mut body = sync_request(&alice.session_id, 0);
     body.actions = (0..64)
         .map(|_| OutEvent {
             id: Uuid::now_v7().to_string(),
@@ -703,7 +721,7 @@ async fn 本文が大きすぎれば読まずに拒む() {
             data: "a".repeat(20 * 1024),
         })
         .collect();
-    let reply = 送る(&server, &body).await;
+    let reply = post_sync(&server, &body).await;
 
     // 1 MiB を超えるため、本文を復号する前に落ちる。
     assert_eq!(reply.status, StatusCode::PAYLOAD_TOO_LARGE);
@@ -711,15 +729,15 @@ async fn 本文が大きすぎれば読まずに拒む() {
 }
 
 #[tokio::test]
-async fn 全員が脱落した部屋は消える() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+async fn removes_a_room_once_everyone_is_gone() {
+    let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
-    let alice = 部屋を作る(&server, 2).await;
+    let alice = create_room(&server, 2).await;
 
-    // Alice が同期を止めれば、保持数を超えたところで部屋には誰もいなくなる。
+    // Alice がsync_requestを止めれば、保持数を超えたところで部屋には誰もいなくなる。
     tokio::time::sleep(Duration::from_millis(400)).await;
-    let reply = 送る(&server, &同期(&alice.session_id, 0)).await;
+    let reply = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
 
     let status: Status = server.get("/v3/status").send().await.msgpack();

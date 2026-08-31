@@ -42,7 +42,7 @@ struct Joined {
     session_id: String,
 }
 
-async fn 部屋を用意(server: &TestServer) -> Created {
+async fn prepare_room(server: &TestServer) -> Created {
     server
         .post(
             "/v3/room/create",
@@ -59,7 +59,7 @@ async fn 部屋を用意(server: &TestServer) -> Created {
         .msgpack()
 }
 
-async fn 参加(server: &TestServer, number: &str) -> Joined {
+async fn join_room(server: &TestServer, number: &str) -> Joined {
     server
         .post(
             "/v3/room/join",
@@ -76,19 +76,19 @@ async fn 参加(server: &TestServer, number: &str) -> Joined {
         .msgpack()
 }
 
-fn 開始(session_id: &str) -> Start {
+fn start_request(session_id: &str) -> Start {
     Start {
         session_id: session_id.to_owned(),
     }
 }
 
 #[tokio::test]
-async fn 部屋主は開始できる() {
+async fn the_owner_can_start() {
     let server = TestServer::start().await;
-    let created = 部屋を用意(&server).await;
+    let created = prepare_room(&server).await;
 
     let reply = server
-        .post("/v3/room/start", &開始(&created.session_id))
+        .post("/v3/room/start", &start_request(&created.session_id))
         .send()
         .await;
 
@@ -96,13 +96,13 @@ async fn 部屋主は開始できる() {
 }
 
 #[tokio::test]
-async fn 部屋主以外は開始できない() {
+async fn others_cannot_start() {
     let server = TestServer::start().await;
-    let created = 部屋を用意(&server).await;
-    let joined = 参加(&server, &created.name).await;
+    let created = prepare_room(&server).await;
+    let joined = join_room(&server, &created.name).await;
 
     let reply = server
-        .post("/v3/room/start", &開始(&joined.session_id))
+        .post("/v3/room/start", &start_request(&joined.session_id))
         .send()
         .await;
 
@@ -111,16 +111,16 @@ async fn 部屋主以外は開始できない() {
 }
 
 #[tokio::test]
-async fn 二度目の開始は拒む() {
+async fn rejects_starting_twice() {
     let server = TestServer::start().await;
-    let created = 部屋を用意(&server).await;
+    let created = prepare_room(&server).await;
 
     server
-        .post("/v3/room/start", &開始(&created.session_id))
+        .post("/v3/room/start", &start_request(&created.session_id))
         .send()
         .await;
     let reply = server
-        .post("/v3/room/start", &開始(&created.session_id))
+        .post("/v3/room/start", &start_request(&created.session_id))
         .send()
         .await;
 
@@ -129,12 +129,15 @@ async fn 二度目の開始は拒む() {
 }
 
 #[tokio::test]
-async fn 無効なセッションは拒む() {
+async fn rejects_an_invalid_session() {
     let server = TestServer::start().await;
-    部屋を用意(&server).await;
+    prepare_room(&server).await;
 
     let reply = server
-        .post("/v3/room/start", &開始(&Uuid::new_v4().to_string()))
+        .post(
+            "/v3/room/start",
+            &start_request(&Uuid::new_v4().to_string()),
+        )
         .send()
         .await;
 
@@ -144,12 +147,12 @@ async fn 無効なセッションは拒む() {
 }
 
 #[tokio::test]
-async fn 開始した部屋には参加できない() {
+async fn cannot_join_after_the_start() {
     let server = TestServer::start().await;
-    let created = 部屋を用意(&server).await;
+    let created = prepare_room(&server).await;
 
     server
-        .post("/v3/room/start", &開始(&created.session_id))
+        .post("/v3/room/start", &start_request(&created.session_id))
         .send()
         .await;
     let reply = server

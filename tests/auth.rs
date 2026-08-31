@@ -12,13 +12,13 @@ const PASSWORD: &str = "correct horse battery staple";
 
 /// ヘッダ値は可視 ASCII しか文字列として読めない。バイト列のまま比較していないと
 /// この形のパスワードが常に拒否される。
-const 非ASCIIのパスワード: &str = "テスト用のパスワード";
+const NON_ASCII_PASSWORD: &str = "テスト用のパスワード";
 
-fn 認証あり() -> Config {
-    パスワードを設定(PASSWORD)
+fn config_with_auth() -> Config {
+    config_with_password(PASSWORD)
 }
 
-fn パスワードを設定(password: &str) -> Config {
+fn config_with_password(password: &str) -> Config {
     Config {
         password: Some(password.to_owned()),
         ..Config::default()
@@ -26,8 +26,8 @@ fn パスワードを設定(password: &str) -> Config {
 }
 
 #[tokio::test]
-async fn 正しいパスワードなら通す() {
-    let Some(server) = TestServer::with_config(認証あり()).await else {
+async fn accepts_the_correct_password() {
+    let Some(server) = TestServer::with_config(config_with_auth()).await else {
         return;
     };
 
@@ -37,8 +37,8 @@ async fn 正しいパスワードなら通す() {
 }
 
 #[tokio::test]
-async fn パスワード無しは拒む() {
-    let Some(server) = TestServer::with_config(認証あり()).await else {
+async fn rejects_a_missing_password() {
+    let Some(server) = TestServer::with_config(config_with_auth()).await else {
         return;
     };
 
@@ -49,8 +49,8 @@ async fn パスワード無しは拒む() {
 }
 
 #[tokio::test]
-async fn 誤ったパスワードは拒む() {
-    let Some(server) = TestServer::with_config(認証あり()).await else {
+async fn rejects_a_wrong_password() {
+    let Some(server) = TestServer::with_config(config_with_auth()).await else {
         return;
     };
 
@@ -61,7 +61,7 @@ async fn 誤ったパスワードは拒む() {
 }
 
 #[tokio::test]
-async fn パスワード未設定なら認証を求めない() {
+async fn requires_nothing_when_no_password_is_set() {
     let Some(server) = TestServer::with_config(Config::default()).await else {
         return;
     };
@@ -72,15 +72,15 @@ async fn パスワード未設定なら認証を求めない() {
 }
 
 #[tokio::test]
-async fn 可視文字以外を含むパスワードでも通る() {
-    let Some(server) = TestServer::with_config(パスワードを設定(非ASCIIのパスワード)).await
+async fn accepts_a_password_outside_visible_ascii() {
+    let Some(server) = TestServer::with_config(config_with_password(NON_ASCII_PASSWORD)).await
     else {
         return;
     };
 
     let reply = server
         .get("/v3/status")
-        .bearer(非ASCIIのパスワード)
+        .bearer(NON_ASCII_PASSWORD)
         .send()
         .await;
 
@@ -88,8 +88,8 @@ async fn 可視文字以外を含むパスワードでも通る() {
 }
 
 #[tokio::test]
-async fn スキーム名は大文字小文字を区別しない() {
-    let Some(server) = TestServer::with_config(認証あり()).await else {
+async fn scheme_name_is_case_insensitive() {
+    let Some(server) = TestServer::with_config(config_with_auth()).await else {
         return;
     };
 
@@ -103,8 +103,8 @@ async fn スキーム名は大文字小文字を区別しない() {
 }
 
 #[tokio::test]
-async fn 他のスキームは拒む() {
-    let Some(server) = TestServer::with_config(認証あり()).await else {
+async fn rejects_other_schemes() {
+    let Some(server) = TestServer::with_config(config_with_auth()).await else {
         return;
     };
 

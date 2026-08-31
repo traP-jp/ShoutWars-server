@@ -14,7 +14,7 @@ struct Status {
 }
 
 #[tokio::test]
-async fn 部屋数と上限を返す() {
+async fn returns_room_count_and_limit() {
     let server = TestServer::start().await;
 
     let reply = server.get("/v3/status").send().await;
@@ -29,7 +29,7 @@ async fn 部屋数と上限を返す() {
 }
 
 #[tokio::test]
-async fn 上限は設定を反映する() {
+async fn limit_reflects_config() {
     let Some(server) = TestServer::with_config(Config {
         room_limit: 7,
         ..Config::default()

@@ -42,7 +42,7 @@ struct Joined {
     tick_ms: u64,
 }
 
-fn 作成(size: usize) -> Create {
+fn create_request(size: usize) -> Create {
     Create {
         version: "1.0".to_owned(),
         user: UserName {
@@ -52,7 +52,7 @@ fn 作成(size: usize) -> Create {
     }
 }
 
-fn 参加(number: &str, version: &str) -> Join {
+fn join_request(number: &str, version: &str) -> Join {
     Join {
         version: version.to_owned(),
         name: number.to_owned(),
@@ -62,21 +62,21 @@ fn 参加(number: &str, version: &str) -> Join {
     }
 }
 
-async fn 部屋を用意(server: &TestServer, size: usize) -> Created {
+async fn prepare_room(server: &TestServer, size: usize) -> Created {
     server
-        .post("/v3/room/create", &作成(size))
+        .post("/v3/room/create", &create_request(size))
         .send()
         .await
         .msgpack()
 }
 
 #[tokio::test]
-async fn 部屋に参加できる() {
+async fn joins_a_room() {
     let server = TestServer::start().await;
-    let created = 部屋を用意(&server, 2).await;
+    let created = prepare_room(&server, 2).await;
 
     let reply = server
-        .post("/v3/room/join", &参加(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.name, "1.0"))
         .send()
         .await;
 
@@ -88,17 +88,17 @@ async fn 部屋に参加できる() {
 }
 
 #[tokio::test]
-async fn 参加者の識別子は部屋主より大きい() {
+async fn joiner_id_is_greater_than_the_owner() {
     let server = TestServer::start().await;
-    let created = 部屋を用意(&server, 2).await;
+    let created = prepare_room(&server, 2).await;
 
     let joined: Joined = server
-        .post("/v3/room/join", &参加(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.name, "1.0"))
         .send()
         .await
         .msgpack();
 
-    // UUIDv7 は参加順に増える。昇順に並べれば先頭が部屋主になる。
+    // UUIDv7 はjoin_request順に増える。昇順に並べれば先頭が部屋主になる。
     assert!(
         created.user_id < joined.user_id,
         "部屋主 {} より若い ID が振られました: {}",
@@ -108,11 +108,11 @@ async fn 参加者の識別子は部屋主より大きい() {
 }
 
 #[tokio::test]
-async fn 存在しない部屋には参加できない() {
+async fn cannot_join_a_missing_room() {
     let server = TestServer::start().await;
 
     let reply = server
-        .post("/v3/room/join", &参加("000000", "1.0"))
+        .post("/v3/room/join", &join_request("000000", "1.0"))
         .send()
         .await;
 
@@ -121,12 +121,12 @@ async fn 存在しない部屋には参加できない() {
 }
 
 #[tokio::test]
-async fn 部屋番号の形式が違えば拒む() {
+async fn rejects_a_malformed_room_number() {
     let server = TestServer::start().await;
 
     for number in ["12345", "1234567", "12345a", "あいうえお"] {
         let reply = server
-            .post("/v3/room/join", &参加(number, "1.0"))
+            .post("/v3/room/join", &join_request(number, "1.0"))
             .send()
             .await;
 
@@ -136,12 +136,12 @@ async fn 部屋番号の形式が違えば拒む() {
 }
 
 #[tokio::test]
-async fn バージョンが違えば拒む() {
+async fn rejects_a_version_mismatch() {
     let server = TestServer::start().await;
-    let created = 部屋を用意(&server, 2).await;
+    let created = prepare_room(&server, 2).await;
 
     let reply = server
-        .post("/v3/room/join", &参加(&created.name, "1.1"))
+        .post("/v3/room/join", &join_request(&created.name, "1.1"))
         .send()
         .await;
 
@@ -150,18 +150,18 @@ async fn バージョンが違えば拒む() {
 }
 
 #[tokio::test]
-async fn 満員なら拒む() {
+async fn rejects_a_full_room() {
     let server = TestServer::start().await;
-    let created = 部屋を用意(&server, 2).await;
+    let created = prepare_room(&server, 2).await;
 
     let reply = server
-        .post("/v3/room/join", &参加(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.name, "1.0"))
         .send()
         .await;
     assert_eq!(reply.status, StatusCode::OK, "2 人目は入れる");
 
     let reply = server
-        .post("/v3/room/join", &参加(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.name, "1.0"))
         .send()
         .await;
 
@@ -170,7 +170,7 @@ async fn 満員なら拒む() {
 }
 
 #[tokio::test]
-async fn 期限切れの部屋には参加できない() {
+async fn cannot_join_an_expired_room() {
     let Some(server) = TestServer::with_config(Config {
         lobby_lifetime: std::time::Duration::from_millis(50),
         ..Config::default()
@@ -179,11 +179,11 @@ async fn 期限切れの部屋には参加できない() {
     else {
         return;
     };
-    let created = 部屋を用意(&server, 2).await;
+    let created = prepare_room(&server, 2).await;
     tokio::time::sleep(std::time::Duration::from_millis(80)).await;
 
     let reply = server
-        .post("/v3/room/join", &参加(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.name, "1.0"))
         .send()
         .await;
 
@@ -192,7 +192,7 @@ async fn 期限切れの部屋には参加できない() {
 }
 
 #[tokio::test]
-async fn 参加時のtickは経過した窓の数() {
+async fn cursor_starts_at_the_current_window() {
     let Some(server) = TestServer::with_config(Config {
         tick: std::time::Duration::from_millis(20),
         ..Config::default()
@@ -201,11 +201,11 @@ async fn 参加時のtickは経過した窓の数() {
     else {
         return;
     };
-    let created = 部屋を用意(&server, 4).await;
+    let created = prepare_room(&server, 4).await;
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let joined: Joined = server
-        .post("/v3/room/join", &参加(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.name, "1.0"))
         .send()
         .await
         .msgpack();
