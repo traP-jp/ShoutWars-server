@@ -12,7 +12,7 @@ mod error;
 mod msgpack;
 mod record;
 mod room;
-pub mod rooms;
+mod room_list;
 
 use std::{future::Future, sync::Arc};
 
@@ -33,7 +33,7 @@ const BODY_LIMIT: usize = 1024 * 1024;
 #[derive(Debug, Clone)]
 pub(crate) struct AppState {
     config: Arc<Config>,
-    rooms: rooms::Shared,
+    rooms: room_list::RoomList,
 }
 
 /// 設定からルーターを組み立てる。
@@ -42,7 +42,7 @@ pub(crate) struct AppState {
 pub fn app(config: &Config) -> Router {
     let config = Arc::new(config.clone());
     let state = AppState {
-        rooms: rooms::Shared::new(Arc::clone(&config)),
+        rooms: room_list::RoomList::new(Arc::clone(&config)),
         config,
     };
     Router::new()

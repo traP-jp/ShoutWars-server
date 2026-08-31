@@ -28,8 +28,9 @@ pub struct Session {
     pub user: Uuid,
 }
 
+/// 登録簿の中身。[`RoomList::lock`] を通してのみ触れる。
 #[derive(Debug)]
-pub struct Rooms {
+pub struct Inner {
     config: Arc<Config>,
     by_number: HashMap<RoomNumber, Room>,
     sessions: HashMap<Uuid, Session>,
@@ -38,7 +39,7 @@ pub struct Rooms {
 /// 部屋番号の引き直しの上限。無いと、番号が埋まってきたときに際限なく回る。
 const NUMBERING_ATTEMPTS: usize = 32;
 
-impl Rooms {
+impl Inner {
     /// 期限切れの部屋を取り除く。
     fn sweep(&mut self) {
         let now = Instant::now();
@@ -178,12 +179,12 @@ impl Rooms {
 
     /// 同期する。
     ///
-    /// 返せるレコードがまだ無ければ [`Sync::Wait`] を返す。呼び出し側は期限か
+    /// 返せるレコードがまだ無ければ [`SyncOutcome::Wait`] を返す。呼び出し側は期限か
     /// 締め切りの通知を待って、もう一度呼ぶ。イベントは最初の 1 回だけ預ける。
     ///
     /// # Errors
     /// セッションが無効、二重同期、保持期間外の `next_tick` などの場合。
-    pub fn sync(&mut self, request: SyncRequest) -> Result<Sync, Error> {
+    pub fn sync(&mut self, request: SyncRequest) -> Result<SyncOutcome, Error> {
         self.sweep();
         let session = *self
             .sessions
@@ -239,9 +240,9 @@ impl Rooms {
         }
 
         if room.records_from(request.next_tick).next().is_some() {
-            return Ok(Sync::Ready(session.user));
+            return Ok(SyncOutcome::Ready(session.user));
         }
-        Ok(Sync::Wait {
+        Ok(SyncOutcome::Wait {
             deadline: room.record_deadline(tick),
             closed: room.subscribe(),
         })
@@ -291,7 +292,7 @@ pub struct Deposit {
 }
 
 #[derive(Debug)]
-pub enum Sync {
+pub enum SyncOutcome {
     /// 返せるレコードがある。値は送信者のユーザー ID。
     Ready(Uuid),
     /// まだ無い。期限か通知を待つ。
@@ -311,14 +312,14 @@ pub struct Joined {
     pub next_tick: u64,
 }
 
-/// ハンドラ間で共有する登録簿。
+/// 部屋とセッションの登録簿。ハンドラ間で共有する。
 #[derive(Debug, Clone)]
-pub struct Shared(Arc<Mutex<Rooms>>);
+pub struct RoomList(Arc<Mutex<Inner>>);
 
-impl Shared {
+impl RoomList {
     #[must_use]
     pub fn new(config: Arc<Config>) -> Self {
-        Self(Arc::new(Mutex::new(Rooms {
+        Self(Arc::new(Mutex::new(Inner {
             config,
             by_number: HashMap::new(),
             sessions: HashMap::new(),
@@ -329,7 +330,7 @@ impl Shared {
     ///
     /// 毒された場合は復帰させる。登録簿は不変条件を跨いで壊れる構造を持たず、
     /// 1 部屋の panic で以降の全リクエストを落とす方が損害が大きい。
-    pub fn lock(&self) -> MutexGuard<'_, Rooms> {
+    pub fn lock(&self) -> MutexGuard<'_, Inner> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

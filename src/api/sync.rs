@@ -11,7 +11,7 @@ use crate::{
     msgpack::MsgPack,
     record::{Event, Incoming, Record},
     room::Room,
-    rooms::{Deposit, Sync, SyncRequest},
+    room_list::{Deposit, SyncOutcome, SyncRequest},
 };
 
 /// 1 リクエストに載せられるイベントの件数。
@@ -165,11 +165,11 @@ pub async fn sync(
                 next_tick,
                 deposit: deposit.take(),
             })? {
-                Sync::Ready(user) => {
+                SyncOutcome::Ready(user) => {
                     let room = rooms.room_of(session_id)?;
                     return Ok(MsgPack(Response::build(room, user, next_tick)));
                 }
-                Sync::Wait { deadline, closed } => (deadline, closed),
+                SyncOutcome::Wait { deadline, closed } => (deadline, closed),
             }
         };
         let (deadline, mut closed) = waiting;
