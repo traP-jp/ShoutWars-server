@@ -94,6 +94,8 @@ pub struct User {
     pub id: Uuid,
     pub name: String,
     pub session_id: Uuid,
+    /// 最後にイベントを預けたレコードの tick 番号 (§2.7)。
+    pub last_seen: u64,
 }
 
 impl User {
@@ -114,6 +116,7 @@ impl User {
             name,
             // セッション ID は暗号論的乱数で生成する。UUIDv7 を使ってはならない (§3.6)。
             session_id: Uuid::new_v4(),
+            last_seen: 0,
         })
     }
 }
@@ -222,11 +225,14 @@ impl Room {
         self.closed_notify.subscribe()
     }
 
-    /// 期限の過ぎたレコードを締め切る (§2.5)。
-    pub fn advance(&mut self, tick: Duration, now: Instant) {
+    /// 期限の過ぎたレコードを締め切り、応答の途絶えたユーザーを外す (§2.5、§2.7)。
+    ///
+    /// 返すのは無効になったセッション。
+    pub fn advance(&mut self, tick: Duration, now: Instant, retention: usize) -> Vec<Uuid> {
         while now >= self.record_deadline(tick) {
             self.close();
         }
+        self.drop_silent(retention)
     }
 
     /// 待機対象の全員が到着したか (§2.5)。不在のユーザーは待たない (§2.7)。
@@ -356,6 +362,31 @@ impl Room {
         let pending = self.pending.entry(from).or_default();
         pending.reports.extend(reports);
         pending.actions.extend(actions);
+        if let Some(user) = self.users.iter_mut().find(|user| user.id == from) {
+            user.last_seen = self.open_tick;
+        }
+    }
+
+    /// 応答が途絶えたユーザーを部屋から除く (§2.7)。
+    ///
+    /// 返すのは無効になったセッション。呼び出し側が登録簿から消す。
+    /// 期間はレコードの保持数と揃える。仕様の 10 秒はどちらも同じ値であり、
+    /// 一方だけを短くすると、部屋には残っているのに追いつけないユーザーが生じる。
+    fn drop_silent(&mut self, retention: usize) -> Vec<Uuid> {
+        let limit = u64::try_from(retention).unwrap_or(u64::MAX);
+        let deadline = self.open_tick.saturating_sub(limit);
+        let mut dropped = Vec::new();
+        self.users.retain(|user| {
+            if user.last_seen >= deadline {
+                return true;
+            }
+            tracing::info!(user_id = %user.id, "応答が途絶えたため部屋から外しました");
+            dropped.push(user.session_id);
+            false
+        });
+        self.absent
+            .retain(|id| self.users.iter().any(|user| user.id == *id));
+        dropped
     }
 
     pub fn has_deposited(&self, user: Uuid) -> bool {

@@ -268,11 +268,19 @@ async fn 古すぎるカーソルは拒む() {
         return;
     };
     let alice = 部屋を作る(&server, 2).await;
-    // 保持数 5、tick 50 ms。6 窓ぶん経過させて 0 番を捨てさせる。
-    tokio::time::sleep(Duration::from_millis(320)).await;
 
-    let reply = 送る(&server, &同期(&alice.session_id, 0)).await;
+    // 同期は続けるがカーソルを進めないクライアント。応答はあるので脱落はしないが、
+    // 保持しているレコードから振り切られる。一人の部屋なので 1 回の同期で 1 tick 進む。
+    let mut last = None;
+    for _ in 0..8 {
+        let reply = 送る(&server, &同期(&alice.session_id, 0)).await;
+        if reply.status != StatusCode::OK {
+            last = Some(reply);
+            break;
+        }
+    }
 
+    let reply = last.expect("保持期間を超えても拒まれませんでした");
     assert_eq!(reply.status, StatusCode::GONE);
     assert_eq!(reply.error_code(), "sync_too_old");
 }
@@ -558,4 +566,60 @@ async fn 申告が無い本文は拒む() {
 
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
     assert_eq!(reply.error_code(), "bad_request");
+}
+
+#[tokio::test]
+async fn 応答が途絶えたユーザーは外れる() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+    let bob = 参加する(&server, &alice.name(), "Bob").await;
+
+    // Bob は一度も同期しない。保持数を超えて応答が無ければ部屋から外れる (§2.7)。
+    let mut users = Vec::new();
+    let mut cursor = 0;
+    for _ in 0..8 {
+        let synced: Synced = 送る(&server, &同期(&alice.session_id, cursor))
+            .await
+            .msgpack();
+        cursor = synced.tick;
+        users = synced.room_users;
+        if users.len() == 1 {
+            break;
+        }
+    }
+
+    assert_eq!(users.len(), 1, "応答の無いユーザーが残っています");
+    assert_eq!(users[0].name, "Alice");
+
+    // 外れたユーザーのセッションは無効になる (§3.6)。
+    let reply = 送る(&server, &同期(&bob.session_id, 0)).await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(reply.error_code(), "invalid_session");
+}
+
+#[tokio::test]
+async fn 間に合わなかったユーザーは不在になる() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+    参加する(&server, &alice.name(), "Bob").await;
+
+    // Bob が来ないので、最初のレコードは期限で締め切られる。
+    let synced: Synced = 送る(&server, &同期(&alice.session_id, 0)).await.msgpack();
+
+    let bob = synced
+        .room_users
+        .iter()
+        .find(|user| user.name == "Bob")
+        .expect("Bob がまだ部屋にいるはず");
+    assert!(bob.absent, "応答しなかったユーザーが不在になっていません");
+    let alice_user = synced
+        .room_users
+        .iter()
+        .find(|user| user.name == "Alice")
+        .expect("Alice がいるはず");
+    assert!(!alice_user.absent);
 }

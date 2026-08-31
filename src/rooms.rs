@@ -92,6 +92,8 @@ impl Rooms {
         name: String,
     ) -> Result<Joined, Error> {
         self.sweep();
+        // 参加者はいま開いているレコードから受け取る (§2.6)。
+        self.refresh(number)?;
         // 期限切れは sweep で消えているため、ここに残っていれば有効な部屋である (§3.1)。
         let room = self.by_number.get_mut(&number).ok_or(Error::RoomNotFound)?;
         if room.version != version {
@@ -104,9 +106,9 @@ impl Rooms {
             return Err(Error::RoomFull);
         }
 
-        // 参加者はいま開いているレコードから受け取る (§2.6)。
-        room.advance(self.config.tick, Instant::now());
-        let user = User::new(name)?;
+        let mut user = User::new(name)?;
+        // 参加した時点を最後の応答とみなす。0 のままだと即座に脱落と判定される (§2.7)。
+        user.last_seen = room.open_tick();
         let joined = Joined {
             session_id: user.session_id,
             user_id: user.id,
@@ -125,6 +127,21 @@ impl Rooms {
         // ユーザー ID は UUIDv7 で単調に増えるため、末尾へ足せば昇順が保たれる (§3.4)。
         room.users.push(user);
         Ok(joined)
+    }
+
+    /// レコードを締め切り、応答の途絶えたユーザーを外す (§2.5、§2.7)。
+    ///
+    /// # Errors
+    /// 部屋が無い場合。
+    fn refresh(&mut self, number: RoomNumber) -> Result<(), Error> {
+        let (tick, retention) = (self.config.tick, self.config.record_retention);
+        let room = self.by_number.get_mut(&number).ok_or(Error::RoomNotFound)?;
+        let dropped = room.advance(tick, Instant::now(), retention);
+        room.trim(retention);
+        for id in dropped {
+            self.sessions.remove(&id);
+        }
+        Ok(())
     }
 
     /// ゲームを開始する (§4.5)。
@@ -166,15 +183,17 @@ impl Rooms {
             .sessions
             .get(&request.session_id)
             .ok_or(Error::InvalidSession)?;
-        let tick = self.config.tick;
-        let retention = self.config.record_retention;
+        let (tick, retention) = (self.config.tick, self.config.record_retention);
+        self.refresh(session.room)?;
+        // 自分が外されていれば、以降の処理はできない (§2.7)。
+        let session = *self
+            .sessions
+            .get(&request.session_id)
+            .ok_or(Error::InvalidSession)?;
         let room = self
             .by_number
             .get_mut(&session.room)
             .ok_or(Error::RoomNotFound)?;
-
-        room.advance(tick, Instant::now());
-        room.trim(retention);
         let is_owner = room.owner_id() == Some(session.user);
 
         if let Some(deposit) = request.deposit {
