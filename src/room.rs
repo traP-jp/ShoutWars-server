@@ -142,6 +142,10 @@ pub struct Room {
     closed: VecDeque<Record>,
     /// 直前のレコードに間に合わなかったユーザー (§2.7)。バリアの待機対象から外す。
     absent: HashSet<Uuid>,
+    /// 保持期間から落ちたレコードまでの累計配信数 (§2.10)。
+    delivered_before: HashMap<Uuid, u64>,
+    /// 食い違いを検出したか (§2.10)。一度立てば全員に通知し続ける。
+    desync: bool,
     /// 締め切りを待っているリクエストを起こす。値は最後に締め切った tick。
     closed_notify: watch::Sender<Option<u64>>,
 }
@@ -186,6 +190,8 @@ impl Room {
             pending: HashMap::new(),
             closed: VecDeque::new(),
             absent: HashSet::new(),
+            delivered_before: HashMap::new(),
+            desync: false,
             closed_notify: watch::Sender::new(None),
         })
     }
@@ -264,21 +270,72 @@ impl Room {
             self.info = info;
         }
 
-        self.closed.push_back(Record {
+        let mut record = Record {
             tick,
             reports: merge(tick, reports),
             actions: merge(tick, actions),
             users,
             started: self.started_at.is_some(),
-        });
+            delivered: HashMap::new(),
+        };
+        record.delivered = self
+            .users
+            .iter()
+            .map(|user| {
+                let before = self.delivered_through(user.id);
+                (user.id, before + record.delivered_to(user.id))
+            })
+            .collect();
+        self.closed.push_back(record);
         self.open_tick += 1;
         let _ = self.closed_notify.send(Some(tick));
+    }
+
+    /// 最後に締め切ったレコードまでの累計配信数。
+    fn delivered_through(&self, user: Uuid) -> u64 {
+        self.closed
+            .back()
+            .map_or_else(
+                || self.delivered_before.get(&user).copied(),
+                |record| record.delivered.get(&user).copied(),
+            )
+            .unwrap_or(0)
+    }
+
+    /// `last_tick` の直前までに配った累計 (§2.10)。
+    ///
+    /// クライアントは `last_tick` より前をすべて処理し終えているはずなので、
+    /// その件数が `applied` と一致する。
+    fn delivered_before_tick(&self, user: Uuid, last_tick: u64) -> u64 {
+        match self.closed.iter().find(|r| r.tick + 1 == last_tick) {
+            Some(record) => record.delivered.get(&user).copied().unwrap_or(0),
+            // 直前のレコードが保持期間から落ちている、または最初のレコードより前。
+            None if self.oldest_tick() == Some(last_tick) => {
+                self.delivered_before.get(&user).copied().unwrap_or(0)
+            }
+            None => 0,
+        }
+    }
+
+    /// クライアントの申告と突き合わせる (§2.10)。一度でも食い違えば以後は立ったまま。
+    pub fn check_applied(&mut self, user: Uuid, last_tick: u64, applied: u64) {
+        let expected = self.delivered_before_tick(user, last_tick);
+        if applied != expected {
+            tracing::warn!(%user, last_tick, applied, expected, "desync を検出しました");
+            self.desync = true;
+        }
+    }
+
+    pub fn is_desynced(&self) -> bool {
+        self.desync
     }
 
     /// 保持期間を超えたレコードを捨てる (§2.6)。
     pub fn trim(&mut self, retention: usize) {
         while self.closed.len() > retention {
-            self.closed.pop_front();
+            if let Some(dropped) = self.closed.pop_front() {
+                self.delivered_before = dropped.delivered;
+            }
         }
     }
 

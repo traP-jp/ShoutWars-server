@@ -23,6 +23,11 @@ const EVENT_LIMIT: usize = 64;
 pub struct Request {
     session_id: Uuid,
     last_tick: u64,
+    /// 受け取って処理したイベントの累計 (§2.10)。
+    ///
+    /// 既定値を持たせない。省略を 0 として扱うと、正常なクライアントが
+    /// desync と判定される。届かなければ本文の不備として拒む。
+    applied: u64,
     #[serde(default)]
     reports: Vec<Incoming>,
     #[serde(default)]
@@ -77,6 +82,7 @@ impl WireEvent {
 impl Response {
     /// `last_tick` 以降のレコードをまとめる。少なくとも 1 件あることが前提 (§2.11)。
     fn build(room: &Room, user: Uuid, last_tick: u64) -> Self {
+        let desync = room.is_desynced();
         let records: Vec<&Record> = room.records_from(last_tick).collect();
         let last = records
             .last()
@@ -117,7 +123,7 @@ impl Response {
             started,
             reports,
             actions,
-            desync: false, // TODO: applied の照合 (§2.10)
+            desync,
         }
     }
 }
@@ -133,6 +139,7 @@ pub async fn sync(
     // イベントを預けるのは最初の 1 回だけ。待ち直しても二重に溜まらないようにする。
     // 送信者 ID はセッションを引いた後でなければ分からないため、ここでは埋めない。
     let mut deposit = Some(Deposit {
+        applied: request.applied,
         reports: request.reports,
         actions: request.actions,
         room_info: request.room_info,

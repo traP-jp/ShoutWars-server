@@ -201,6 +201,7 @@ impl Rooms {
                     .map(|event| event.sent_by(session.user))
                     .collect()
             };
+            room.check_applied(session.user, request.last_tick, deposit.applied);
             room.deposit(
                 session.user,
                 attach(deposit.reports),
@@ -253,6 +254,7 @@ pub struct SyncRequest {
 
 #[derive(Debug)]
 pub struct Deposit {
+    pub applied: u64,
     pub reports: Vec<Incoming>,
     pub actions: Vec<Incoming>,
     pub room_info: Option<Value>,

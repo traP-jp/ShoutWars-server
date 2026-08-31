@@ -1,7 +1,7 @@
 //! 同期レコード (仕様 §2.1)。1 tick 分のイベント集合。
 
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{HashMap, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
 };
 
@@ -56,6 +56,24 @@ pub struct Record {
     pub actions: Vec<Event>,
     pub users: Vec<UserSnapshot>,
     pub started: bool,
+    /// このレコードまでにユーザーへ配った累計イベント数 (§2.10)。
+    ///
+    /// 参加より前のぶんは数えない。クライアントの `applied` と突き合わせる。
+    pub delivered: HashMap<Uuid, u64>,
+}
+
+impl Record {
+    /// このレコードで `user` へ配るイベントの件数。
+    ///
+    /// 報告イベントは送信者に返さないため (§2.2)、送信者ごとに数が違う。
+    pub fn delivered_to(&self, user: Uuid) -> u64 {
+        let own_reports = self
+            .reports
+            .iter()
+            .filter(|event| event.from == user)
+            .count();
+        (self.reports.len() - own_reports + self.actions.len()) as u64
+    }
 }
 
 /// この tick における送信者の順位 (§2.4)。

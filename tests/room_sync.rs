@@ -42,10 +42,18 @@ struct UserName {
 struct Sync {
     session_id: String,
     last_tick: u64,
+    applied: u64,
     reports: Vec<OutEvent>,
     actions: Vec<OutEvent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     room_info: Option<String>,
+}
+
+/// `applied` を欠いた本文。
+#[derive(Debug, Serialize)]
+struct 申告なし {
+    session_id: String,
+    last_tick: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -454,4 +462,100 @@ async fn 過去のレコードのイベントには番号が付く() {
         synced.actions[1].tick, None,
         "最後のレコードのイベントには番号を付けない"
     );
+}
+
+fn 申告(session_id: &str, last_tick: u64, applied: u64) -> Sync {
+    Sync {
+        session_id: session_id.to_owned(),
+        last_tick,
+        applied,
+        ..Sync::default()
+    }
+}
+
+#[tokio::test]
+async fn 申告が合っていれば異常としない() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+
+    let mut first = 申告(&alice.session_id, 0, 0);
+    first.actions = vec![イベント("attack", "A")];
+    let first: Synced = 送る(&server, &first).await.msgpack();
+    assert_eq!(first.actions.len(), 1);
+    assert!(!first.desync);
+
+    // 1 件受け取ったので、次は applied = 1 を申告する。
+    let second: Synced = 送る(&server, &申告(&alice.session_id, first.tick, 1))
+        .await
+        .msgpack();
+
+    assert!(!second.desync, "正しい申告で desync と判定されました");
+}
+
+#[tokio::test]
+async fn 申告がずれていれば検出する() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+
+    let mut first = 申告(&alice.session_id, 0, 0);
+    first.actions = vec![イベント("attack", "A")];
+    let first: Synced = 送る(&server, &first).await.msgpack();
+
+    // 1 件配られたのに 99 件処理したと申告する。
+    let second: Synced = 送る(&server, &申告(&alice.session_id, first.tick, 99))
+        .await
+        .msgpack();
+
+    assert!(second.desync, "食い違いを検出できていません (§2.10)");
+}
+
+#[tokio::test]
+async fn 検出したら全員に伝える() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+    let bob = 参加する(&server, &alice.name(), "Bob").await;
+
+    let bob_reply = tokio::spawn({
+        let server = server.clone();
+        let body = 申告(&bob.session_id, 0, 42);
+        async move { 送る(&server, &body).await }
+    });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let alice_synced: Synced = 送る(&server, &申告(&alice.session_id, 0, 0))
+        .await
+        .msgpack();
+    bob_reply.await.expect("Bob の同期が終わりません");
+
+    assert!(
+        alice_synced.desync,
+        "自分は正しくても、部屋の食い違いは伝わるべき (§2.10)"
+    );
+}
+
+#[tokio::test]
+async fn 申告が無い本文は拒む() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+
+    let reply = server
+        .post(
+            "/v3/room/sync",
+            &申告なし {
+                session_id: alice.session_id.clone(),
+                last_tick: 0,
+            },
+        )
+        .send()
+        .await;
+
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert_eq!(reply.error_code(), "bad_request");
 }
