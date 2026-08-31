@@ -324,6 +324,11 @@ impl Room {
     }
 
     /// クライアントの申告と突き合わせる (仕様「desync 検出」)。一度でも食い違えば以後は立ったまま。
+    ///
+    /// ゲームの状態そのものをハッシュして突き合わせる方式は採らない。何を対象に含めるかを
+    /// 全クライアントで揃え続ける必要があり、揃っていなければ誤検出する。件数の比較なら
+    /// ゲームの内容に依存しない。増分ハッシュ (XOR) も適さない。自己逆元であるため、
+    /// 検出したい二重適用がちょうど打ち消し合って一致してしまう。
     pub fn check_applied(&mut self, user: Uuid, next_tick: u64, applied: u64) {
         let expected = self.delivered_before_tick(user, next_tick);
         if applied != expected {

@@ -40,6 +40,8 @@ impl Default for Config {
             room_limit: 100,
             lobby_lifetime: Duration::from_mins(10),
             game_lifetime: Duration::from_mins(20),
+            // 音声の単語検出に約 0.5 秒かかるため、これより短くしても入力遅延はほとんど
+            // 縮まらない。縮めた分だけリクエストの頻度が上がるだけになる。
             tick: Duration::from_millis(100),
             record_retention: 100,
         }
