@@ -47,6 +47,12 @@ impl Default for Config {
 }
 
 impl Config {
+    /// tick の幅をミリ秒で返す。クライアントへは `tick_ms` として渡す (§2.5)。
+    #[must_use]
+    pub fn tick_ms(&self) -> u64 {
+        u64::try_from(self.tick.as_millis()).unwrap_or(u64::MAX)
+    }
+
     /// 環境変数を読んで検証する。
     ///
     /// # Errors

@@ -100,7 +100,12 @@ impl TestServer {
 
     /// 本文を MessagePack で符号化して送る。
     pub fn post(&self, path: &str, body: &impl Serialize) -> Request {
-        let encoded = rmp_serde::to_vec_named(body).expect("本文を符号化できません");
+        let mut encoded = Vec::new();
+        let mut serializer = rmp_serde::Serializer::new(&mut encoded)
+            .with_struct_map()
+            .with_human_readable();
+        body.serialize(&mut serializer)
+            .expect("本文を符号化できません");
         Request(
             self.request(Method::POST, path)
                 .0
@@ -171,7 +176,10 @@ impl Reply {
             Some("application/msgpack"),
             "Content-Type が仕様と異なります"
         );
-        rmp_serde::from_slice(&self.body).expect("本文を MessagePack として読めません")
+        // サーバーと同じ表現を選ぶ。UUID は 16 バイトの配列ではなく文字列で流れる (仕様 §4)。
+        let mut deserializer =
+            rmp_serde::Deserializer::from_read_ref(&self.body).with_human_readable();
+        T::deserialize(&mut deserializer).expect("本文を MessagePack として読めません")
     }
 
     /// エラー本文を読み、`code` を返す (仕様 §5.1)。

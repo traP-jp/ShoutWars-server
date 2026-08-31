@@ -32,7 +32,6 @@ pub enum Error {
     Internal,
 }
 
-#[expect(dead_code, reason = "各エンドポイントの実装とともに使い始める")]
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
