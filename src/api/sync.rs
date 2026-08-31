@@ -19,6 +19,12 @@ use crate::{
 /// 正常なクライアントは到達しない。壊れたクライアントに対する防波堤である。
 const EVENT_LIMIT: usize = 64;
 
+/// 1 イベントの `data` のサイズ (§6.1)。
+const DATA_LIMIT: usize = 8 * 1024;
+
+/// `room_info` のサイズ (§6.1)。
+const ROOM_INFO_LIMIT: usize = 64 * 1024;
+
 #[derive(Debug, Deserialize)]
 pub struct Request {
     session_id: Uuid,
@@ -132,8 +138,14 @@ pub async fn sync(
     State(state): State<AppState>,
     MsgPack(request): MsgPack<Request>,
 ) -> Result<MsgPack<Response>> {
-    check_limit("reports", request.reports.len())?;
-    check_limit("actions", request.actions.len())?;
+    check_count("reports", request.reports.len())?;
+    check_count("actions", request.actions.len())?;
+    for event in request.reports.iter().chain(&request.actions) {
+        check_size("イベントの data", &event.data, DATA_LIMIT)?;
+    }
+    if let Some(info) = &request.room_info {
+        check_size("room_info", info, ROOM_INFO_LIMIT)?;
+    }
     let (session_id, last_tick) = (request.session_id, request.last_tick);
 
     // イベントを預けるのは最初の 1 回だけ。待ち直しても二重に溜まらないようにする。
@@ -168,10 +180,25 @@ pub async fn sync(
     }
 }
 
-fn check_limit(name: &str, count: usize) -> Result<()> {
+fn check_count(name: &str, count: usize) -> Result<()> {
     if count > EVENT_LIMIT {
         return Err(Error::LimitExceeded(format!(
             "{name} は 1 回につき {EVENT_LIMIT} 件までです。"
+        )));
+    }
+    Ok(())
+}
+
+/// 符号化した長さで測る。中身は解釈しない (§1.2)。
+fn check_size(name: &str, value: &Value, limit: usize) -> Result<()> {
+    let size = rmp_serde::to_vec(value).map_err(|error| {
+        tracing::error!(%error, "サイズを測れませんでした");
+        Error::Internal
+    })?;
+    if size.len() > limit {
+        return Err(Error::LimitExceeded(format!(
+            "{name} は {} KiB までです。",
+            limit / 1024
         )));
     }
     Ok(())

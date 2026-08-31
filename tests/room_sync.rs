@@ -242,7 +242,13 @@ async fn 相手の報告は届く() {
 
 #[tokio::test]
 async fn 二重の同期は拒む() {
-    let Some(server) = TestServer::with_config(設定()).await else {
+    // 窓を長く取り、1 本目が確実に届いてから 2 本目を送る。
+    let Some(server) = TestServer::with_config(Config {
+        tick: Duration::from_millis(500),
+        ..設定()
+    })
+    .await
+    else {
         return;
     };
     let alice = 部屋を作る(&server, 2).await;
@@ -254,7 +260,7 @@ async fn 二重の同期は拒む() {
         let body = 同期(&alice.session_id, 0);
         async move { 送る(&server, &body).await }
     });
-    tokio::time::sleep(Duration::from_millis(5)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let second = 送る(&server, &同期(&alice.session_id, 0)).await;
     first.await.expect("最初の同期が終わりません");
 
@@ -622,4 +628,79 @@ async fn 間に合わなかったユーザーは不在になる() {
         .find(|user| user.name == "Alice")
         .expect("Alice がいるはず");
     assert!(!alice_user.absent);
+}
+
+#[tokio::test]
+async fn 大きすぎるデータは拒む() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+
+    let mut body = 同期(&alice.session_id, 0);
+    body.actions = vec![OutEvent {
+        id: Uuid::now_v7().to_string(),
+        kind: "attack".to_owned(),
+        data: "あ".repeat(8 * 1024),
+    }];
+    let reply = 送る(&server, &body).await;
+
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert_eq!(reply.error_code(), "limit_exceeded");
+}
+
+#[tokio::test]
+async fn 上限内のデータは通る() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+
+    let mut body = 同期(&alice.session_id, 0);
+    body.actions = vec![OutEvent {
+        id: Uuid::now_v7().to_string(),
+        kind: "attack".to_owned(),
+        // 文字列の符号化には長さの分も乗るため、上限より少し小さく取る。
+        data: "a".repeat(8 * 1024 - 8),
+    }];
+    let reply = 送る(&server, &body).await;
+
+    assert_eq!(reply.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn 大きすぎる部屋情報は拒む() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+
+    let mut body = 同期(&alice.session_id, 0);
+    body.room_info = Some("あ".repeat(64 * 1024));
+    let reply = 送る(&server, &body).await;
+
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert_eq!(reply.error_code(), "limit_exceeded");
+}
+
+#[tokio::test]
+async fn 本文が大きすぎれば読まずに拒む() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+
+    let mut body = 同期(&alice.session_id, 0);
+    body.actions = (0..64)
+        .map(|_| OutEvent {
+            id: Uuid::now_v7().to_string(),
+            kind: "attack".to_owned(),
+            data: "a".repeat(20 * 1024),
+        })
+        .collect();
+    let reply = 送る(&server, &body).await;
+
+    // 1 MiB を超えるため、本文を復号する前に落ちる (§6.1)。
+    assert_eq!(reply.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(reply.error_code(), "limit_exceeded");
 }
