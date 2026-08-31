@@ -17,7 +17,7 @@ use tokio::net::TcpListener;
 use crate::config::Config;
 
 /// ルーターが共有する状態。
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct AppState {
     room_limit: usize,
 }

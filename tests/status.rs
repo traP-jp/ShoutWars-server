@@ -7,7 +7,7 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use shoutwars_server::config::Config;
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct Status {
     room_count: usize,
     room_limit: usize,

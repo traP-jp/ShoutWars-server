@@ -9,6 +9,7 @@ use serde::Serialize;
 ///
 /// マップのキーは名前で符号化する。クライアントは名前で読むため、
 /// フィールド順に依存しない形式でなければならない。
+#[derive(Debug)]
 pub struct MsgPack<T>(pub T);
 
 impl<T: Serialize> IntoResponse for MsgPack<T> {

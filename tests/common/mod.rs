@@ -9,9 +9,10 @@
 //! できないため [`TestServer::with_config`] が `None` を返して省略される。
 //! そのサーバーがパスワードを要求する場合は `TEST_SERVER_PASSWORD` に指定する。
 
-// 統合テストは 1 ファイルにつき 1 クレートとしてビルドされるため、
-// 使っていないファイル側では未使用に見えてしまう。
-#![allow(dead_code)]
+// 統合テストは 1 ファイルにつき 1 クレートとしてビルドされるため、使っていない
+// ファイル側では未使用に見えてしまう。どのクレートで使われるかは一定しないので、
+// 充足を要求する expect ではなく allow を使う。
+#![allow(dead_code, reason = "テストクレートごとに使う項目が異なる")]
 
 use std::{
     env,
@@ -19,10 +20,11 @@ use std::{
 };
 
 use reqwest::{Method, StatusCode};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use shoutwars_server::config::Config;
 use tokio::net::TcpListener;
 
+#[derive(Debug)]
 pub struct TestServer {
     base_url: String,
     http: reqwest::Client,
@@ -118,6 +120,7 @@ impl TestServer {
     }
 }
 
+#[derive(Debug)]
 pub struct Request(reqwest::RequestBuilder);
 
 impl Request {
@@ -147,6 +150,7 @@ impl Request {
     }
 }
 
+#[derive(Debug)]
 pub struct Reply {
     pub status: StatusCode,
     pub content_type: Option<String>,
@@ -175,12 +179,12 @@ impl Reply {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ErrorBody {
     pub error: ErrorDetail,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ErrorDetail {
     pub code: String,
     pub message: String,
