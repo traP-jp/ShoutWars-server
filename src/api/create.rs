@@ -1,4 +1,4 @@
-//! `POST /v3/room/create` (仕様 §4.2)。
+//! `POST /v3/room/create`。
 
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ pub struct Response {
     user_id: Uuid,
     id: Uuid,
     name: RoomNumber,
-    /// 最初の同期で申告するカーソル。作成直後なので 0 から始まる (§2.6)。
+    /// 最初の同期で申告するカーソル。作成直後なので 0 から始まる (仕様「配送」)。
     next_tick: u64,
     tick_ms: u64,
 }

@@ -1,4 +1,4 @@
-//! `POST /v3/room/create` (仕様 §4.2)。
+//! `POST /v3/room/create`。
 
 mod common;
 
@@ -20,7 +20,7 @@ struct UserName {
     name: String,
 }
 
-/// UUID は文字列で流れる (仕様 §4)。バイト列で符号化していれば、ここで落ちる。
+/// UUID は文字列で流れる (仕様「API」)。バイト列で符号化していれば、ここで落ちる。
 #[derive(Debug, Deserialize)]
 struct Created {
     session_id: String,

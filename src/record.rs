@@ -1,4 +1,4 @@
-//! 同期レコード (仕様 §2.1)。1 tick 分のイベント集合。
+//! 同期レコード (仕様「同期の概観」)。1 tick 分のイベント集合。
 
 use std::{
     collections::{HashMap, hash_map::DefaultHasher},
@@ -9,7 +9,7 @@ use rmpv::Value;
 use serde::Deserialize;
 use uuid::Uuid;
 
-/// イベント。`data` の中身はサーバーが解釈しない (§1.2)。
+/// イベント。`data` の中身はサーバーが解釈しない (仕様「非責務」)。
 #[derive(Debug)]
 pub struct Event {
     pub id: Uuid,
@@ -40,7 +40,7 @@ impl Incoming {
     }
 }
 
-/// レコード締め切り時点のユーザー (§2.8)。
+/// レコード締め切り時点のユーザー (仕様「メンバーシップ」)。
 #[derive(Debug, Clone)]
 pub struct UserSnapshot {
     pub id: Uuid,
@@ -48,7 +48,7 @@ pub struct UserSnapshot {
     pub absent: bool,
 }
 
-/// 締め切られたレコード。二度と変わらない (§2.11)。
+/// 締め切られたレコード。二度と変わらない (仕様「サーバーが保証すること」)。
 #[derive(Debug)]
 pub struct Record {
     pub tick: u64,
@@ -56,7 +56,7 @@ pub struct Record {
     pub actions: Vec<Event>,
     pub users: Vec<UserSnapshot>,
     pub started: bool,
-    /// このレコードまでにユーザーへ配った累計イベント数 (§2.10)。
+    /// このレコードまでにユーザーへ配った累計イベント数 (仕様「desync 検出」)。
     ///
     /// 参加より前のぶんは数えない。クライアントの `applied` と突き合わせる。
     pub delivered: HashMap<Uuid, u64>,
@@ -65,7 +65,7 @@ pub struct Record {
 impl Record {
     /// このレコードで `user` へ配るイベントの件数。
     ///
-    /// 報告イベントは送信者に返さないため (§2.2)、送信者ごとに数が違う。
+    /// 報告イベントは送信者に返さないため (仕様「報告イベント」)、送信者ごとに数が違う。
     pub fn delivered_to(&self, user: Uuid) -> u64 {
         let own_reports = self
             .reports
@@ -76,7 +76,7 @@ impl Record {
     }
 }
 
-/// この tick における送信者の順位 (§2.4)。
+/// この tick における送信者の順位 (仕様「順序の規則」)。
 ///
 /// tick ごとに並びが入れ替わるため、特定のプレイヤーが恒久的に有利になることがない。
 /// イベント ID の時刻部を使う方式と違い、クライアントのローカル時計に依存しない。
@@ -87,7 +87,7 @@ pub fn sender_rank(tick: u64, user: Uuid) -> u64 {
     hasher.finish()
 }
 
-/// 送信者ごとのイベントを、仕様の順序で 1 本に連結する (§2.4)。
+/// 送信者ごとのイベントを、仕様の順序で 1 本に連結する (仕様「順序の規則」)。
 ///
 /// 送信者の配列をそのまま繋ぐため、同一送信者内の順序は崩れない。
 pub fn merge(tick: u64, mut per_sender: Vec<(Uuid, Vec<Event>)>) -> Vec<Event> {

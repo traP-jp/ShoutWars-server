@@ -1,4 +1,4 @@
-//! `POST /v3/room/join` (仕様 §4.3)。
+//! `POST /v3/room/join`。
 
 mod common;
 
@@ -98,7 +98,7 @@ async fn 参加者の識別子は部屋主より大きい() {
         .await
         .msgpack();
 
-    // UUIDv7 は参加順に増える。昇順に並べれば先頭が部屋主になる (§3.4)。
+    // UUIDv7 は参加順に増える。昇順に並べれば先頭が部屋主になる (仕様「部屋主」)。
     assert!(
         created.user_id < joined.user_id,
         "部屋主 {} より若い ID が振られました: {}",

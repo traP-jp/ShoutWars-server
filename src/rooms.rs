@@ -21,7 +21,7 @@ use crate::{
     room::{Room, RoomNumber, User},
 };
 
-/// セッションが指す先 (§3.6)。
+/// セッションが指す先 (仕様「セッション」)。
 #[derive(Debug, Clone, Copy)]
 pub struct Session {
     pub room: RoomNumber,
@@ -35,11 +35,11 @@ pub struct Rooms {
     sessions: HashMap<Uuid, Session>,
 }
 
-/// 部屋番号の引き直しの上限 (§6.1)。無いと、番号が埋まってきたときに際限なく回る。
+/// 部屋番号の引き直しの上限 (仕様「上限の一覧」)。無いと、番号が埋まってきたときに際限なく回る。
 const NUMBERING_ATTEMPTS: usize = 32;
 
 impl Rooms {
-    /// 期限切れの部屋を取り除く (§3.1)。
+    /// 期限切れの部屋を取り除く (仕様「部屋の状態」)。
     fn sweep(&mut self) {
         let now = Instant::now();
         let config = &self.config;
@@ -61,7 +61,7 @@ impl Rooms {
         self.by_number.len()
     }
 
-    /// 部屋を作る (§4.2)。
+    /// 部屋を作る (仕様「POST /v3/room/create」)。
     ///
     /// # Errors
     /// 部屋数が上限に達している場合、または番号を採れなかった場合。
@@ -81,7 +81,7 @@ impl Rooms {
         Ok(self.by_number.entry(number).or_insert(room))
     }
 
-    /// 部屋に参加する (§4.3)。
+    /// 部屋に参加する (仕様「POST /v3/room/join」)。
     ///
     /// # Errors
     /// 部屋が無い・期限切れ・バージョン不一致・開始済み・満員・名前が長すぎる場合。
@@ -92,9 +92,9 @@ impl Rooms {
         name: String,
     ) -> Result<Joined, Error> {
         self.sweep();
-        // 参加者はいま開いているレコードから受け取る (§2.6)。
+        // 参加者はいま開いているレコードから受け取る (仕様「配送」)。
         self.refresh(number)?;
-        // 期限切れは sweep で消えているため、ここに残っていれば有効な部屋である (§3.1)。
+        // 期限切れは sweep で消えているため、ここに残っていれば有効な部屋である (仕様「部屋の状態」)。
         let room = self.by_number.get_mut(&number).ok_or(Error::RoomNotFound)?;
         if room.version != version {
             return Err(Error::VersionMismatch);
@@ -107,7 +107,7 @@ impl Rooms {
         }
 
         let mut user = User::new(name)?;
-        // 参加した時点を最後の応答とみなす。0 のままだと即座に脱落と判定される (§2.7)。
+        // 参加した時点を最後の応答とみなす。0 のままだと即座に脱落と判定される (仕様「遅延・不在・脱落・復帰」)。
         user.last_seen = room.open_tick();
         let joined = Joined {
             session_id: user.session_id,
@@ -124,12 +124,12 @@ impl Rooms {
             },
         );
         tracing::info!(id = %room.id, %number, user_id = %user.id, "部屋に参加しました");
-        // ユーザー ID は UUIDv7 で単調に増えるため、末尾へ足せば昇順が保たれる (§3.4)。
+        // ユーザー ID は UUIDv7 で単調に増えるため、末尾へ足せば昇順が保たれる (仕様「部屋主」)。
         room.users.push(user);
         Ok(joined)
     }
 
-    /// レコードを締め切り、応答の途絶えたユーザーを外す (§2.5、§2.7)。
+    /// レコードを締め切り、応答の途絶えたユーザーを外す (仕様「tick の進行」、仕様「遅延・不在・脱落・復帰」)。
     ///
     /// # Errors
     /// 部屋が無い場合。
@@ -150,13 +150,13 @@ impl Rooms {
         Ok(())
     }
 
-    /// ゲームを開始する (§4.5)。
+    /// ゲームを開始する (仕様「POST /v3/room/start」)。
     ///
     /// # Errors
     /// セッションが無効、部屋主でない、または既に開始している場合。
     pub fn start(&mut self, session_id: Uuid) -> Result<(), Error> {
         self.sweep();
-        // セッションの検証を先に行い、部屋の存在に言及しない (§5.3)。
+        // セッションの検証を先に行い、部屋の存在に言及しない (仕様「存在の秘匿について」)。
         let session = *self
             .sessions
             .get(&session_id)
@@ -176,7 +176,7 @@ impl Rooms {
         Ok(())
     }
 
-    /// 同期する (§4.4)。
+    /// 同期する (仕様「POST /v3/room/sync」)。
     ///
     /// 返せるレコードがまだ無ければ [`Sync::Wait`] を返す。呼び出し側は期限か
     /// 締め切りの通知を待って、もう一度呼ぶ。イベントは最初の 1 回だけ預ける。
@@ -191,7 +191,7 @@ impl Rooms {
             .ok_or(Error::InvalidSession)?;
         let (tick, retention) = (self.config.tick, self.config.record_retention);
         self.refresh(session.room)?;
-        // 自分が外されていれば、以降の処理はできない (§2.7)。
+        // 自分が外されていれば、以降の処理はできない (仕様「遅延・不在・脱落・復帰」)。
         let session = *self
             .sessions
             .get(&request.session_id)
@@ -259,7 +259,7 @@ impl Rooms {
         self.by_number.get(&session.room).ok_or(Error::RoomNotFound)
     }
 
-    /// 空いている部屋番号を引く。使用中なら引き直す (§3.2)。
+    /// 空いている部屋番号を引く。使用中なら引き直す (仕様「部屋番号」)。
     fn take_number(&self) -> Result<RoomNumber, Error> {
         (0..NUMBERING_ATTEMPTS)
             .map(|_| RoomNumber::random())

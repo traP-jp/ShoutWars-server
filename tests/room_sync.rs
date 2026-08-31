@@ -1,4 +1,4 @@
-//! `POST /v3/room/sync` (仕様 §4.4)。
+//! `POST /v3/room/sync`。
 
 mod common;
 
@@ -177,7 +177,7 @@ async fn 一人でも同期できる() {
     let synced: Synced = reply.msgpack();
     assert!(
         synced.next_tick >= 1,
-        "必ず 1 件以上のレコードを返す (§2.11)"
+        "必ず 1 件以上のレコードを返す (仕様「サーバーが保証すること」)"
     );
     assert_eq!(synced.room_users.len(), 1);
     assert_eq!(synced.room_users[0].id, alice.user_id);
@@ -201,7 +201,11 @@ async fn 確認イベントは送信者にも返る() {
     body.actions = vec![イベント("attack", "えい")];
     let synced: Synced = 送る(&server, &body).await.msgpack();
 
-    assert_eq!(synced.actions.len(), 1, "送信者にも返る (§2.3)");
+    assert_eq!(
+        synced.actions.len(),
+        1,
+        "送信者にも返る (仕様「確認イベント」)"
+    );
     assert_eq!(synced.actions[0].kind, "attack");
     assert_eq!(synced.actions[0].data, "えい");
     assert_eq!(
@@ -221,7 +225,10 @@ async fn 報告イベントは送信者に返らない() {
     body.reports = vec![イベント("position", "3,4")];
     let synced: Synced = 送る(&server, &body).await.msgpack();
 
-    assert!(synced.reports.is_empty(), "送信者には返さない (§2.2)");
+    assert!(
+        synced.reports.is_empty(),
+        "送信者には返さない (仕様「報告イベント」)"
+    );
 }
 
 #[tokio::test]
@@ -358,7 +365,10 @@ async fn 開始は同期の応答に現れる() {
         .await;
     let synced: Synced = 送る(&server, &同期(&alice.session_id, 0)).await.msgpack();
 
-    assert!(synced.started, "開始が伝わっていません (§3.7)");
+    assert!(
+        synced.started,
+        "開始が伝わっていません (仕様「ゲームの開始」)"
+    );
 }
 
 #[tokio::test]
@@ -383,7 +393,7 @@ async fn 部屋情報を送る(server: &TestServer, session_id: &str, info: &str
     body.room_info = Some(info.to_owned());
     let server = server.clone();
     tokio::spawn(async move { 送る(&server, &body).await });
-    // 締め切りを跨がせる。反映はレコードの締め切り時である (§2.9)。
+    // 締め切りを跨がせる。反映はレコードの締め切り時である (仕様「room_info」)。
     tokio::time::sleep(Duration::from_millis(120)).await;
 }
 
@@ -435,7 +445,7 @@ async fn 部屋主以外の部屋情報は無視する() {
     assert_eq!(
         部屋情報を見る(&server, &alice.name(), "Charlie").await,
         None,
-        "部屋主以外の更新が通りました (§2.9)"
+        "部屋主以外の更新が通りました (仕様「room_info」)"
     );
 }
 
@@ -477,7 +487,7 @@ async fn 過去のレコードのイベントには番号が付く() {
     assert_eq!(
         synced.actions[0].tick,
         Some(0),
-        "最後以外のレコードには番号が付く (§4.4)"
+        "最後以外のレコードには番号が付く (仕様「POST /v3/room/sync」)"
     );
     assert_eq!(synced.actions[1].data, "B");
     assert_eq!(
@@ -532,7 +542,10 @@ async fn 申告がずれていれば検出する() {
         .await
         .msgpack();
 
-    assert!(second.desync, "食い違いを検出できていません (§2.10)");
+    assert!(
+        second.desync,
+        "食い違いを検出できていません (仕様「desync 検出」)"
+    );
 }
 
 #[tokio::test]
@@ -556,7 +569,7 @@ async fn 検出したら全員に伝える() {
 
     assert!(
         alice_synced.desync,
-        "自分は正しくても、部屋の食い違いは伝わるべき (§2.10)"
+        "自分は正しくても、部屋の食い違いは伝わるべき (仕様「desync 検出」)"
     );
 }
 
@@ -590,7 +603,7 @@ async fn 応答が途絶えたユーザーは外れる() {
     let alice = 部屋を作る(&server, 2).await;
     let bob = 参加する(&server, &alice.name(), "Bob").await;
 
-    // Bob は一度も同期しない。保持数を超えて応答が無ければ部屋から外れる (§2.7)。
+    // Bob は一度も同期しない。保持数を超えて応答が無ければ部屋から外れる (仕様「遅延・不在・脱落・復帰」)。
     let mut users = Vec::new();
     let mut cursor = 0;
     for _ in 0..8 {
@@ -607,7 +620,7 @@ async fn 応答が途絶えたユーザーは外れる() {
     assert_eq!(users.len(), 1, "応答の無いユーザーが残っています");
     assert_eq!(users[0].name, "Alice");
 
-    // 外れたユーザーのセッションは無効になる (§3.6)。
+    // 外れたユーザーのセッションは無効になる (仕様「セッション」)。
     let reply = 送る(&server, &同期(&bob.session_id, 0)).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
     assert_eq!(reply.error_code(), "invalid_session");
@@ -708,7 +721,7 @@ async fn 本文が大きすぎれば読まずに拒む() {
         .collect();
     let reply = 送る(&server, &body).await;
 
-    // 1 MiB を超えるため、本文を復号する前に落ちる (§6.1)。
+    // 1 MiB を超えるため、本文を復号する前に落ちる (仕様「上限の一覧」)。
     assert_eq!(reply.status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(reply.error_code(), "limit_exceeded");
 }

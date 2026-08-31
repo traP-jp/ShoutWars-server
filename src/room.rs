@@ -1,4 +1,4 @@
-//! 部屋とユーザー (仕様 §3)。
+//! 部屋とユーザー (仕様「部屋のライフサイクル」)。
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -18,7 +18,7 @@ use crate::{
     record::{Event, Record, UserSnapshot, merge},
 };
 
-/// 部屋番号 (仕様 §3.2)。口頭で伝えられるよう、部屋 ID とは別に持つ 6 桁の数字。
+/// 部屋番号 (仕様「部屋番号」)。口頭で伝えられるよう、部屋 ID とは別に持つ 6 桁の数字。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RoomNumber(u32);
 
@@ -26,7 +26,7 @@ impl RoomNumber {
     const DIGITS: u32 = 6;
     const RANGE: u32 = 10_u32.pow(Self::DIGITS);
 
-    /// 暗号論的乱数で採番する (§3.2)。
+    /// 暗号論的乱数で採番する (仕様「部屋番号」)。
     ///
     /// 剰余による偏りは `2^32 / 10^6` の端数ぶんで、10 万分の 1 未満。
     /// 番号は総当たりを困難にするためのものであり、この偏りは問題にならない。
@@ -87,19 +87,19 @@ impl<'de> Deserialize<'de> for RoomNumber {
     }
 }
 
-/// 部屋への 1 回の参加 (仕様 §3.3)。同一人物との対応は保証しない。
+/// 部屋への 1 回の参加 (仕様「ユーザー」)。同一人物との対応は保証しない。
 #[derive(Debug)]
 pub struct User {
-    /// UUIDv7。参加順に増えるため、昇順に並べると先頭が部屋主になる (§3.4)。
+    /// UUIDv7。参加順に増えるため、昇順に並べると先頭が部屋主になる (仕様「部屋主」)。
     pub id: Uuid,
     pub name: String,
     pub session_id: Uuid,
-    /// 最後にイベントを預けたレコードの tick 番号 (§2.7)。
+    /// 最後にイベントを預けたレコードの tick 番号 (仕様「遅延・不在・脱落・復帰」)。
     pub last_seen: u64,
 }
 
 impl User {
-    /// ユーザー名の上限 (§6.1)。
+    /// ユーザー名の上限 (仕様「上限の一覧」)。
     const NAME_LIMIT: usize = 32;
 
     /// # Errors
@@ -114,7 +114,7 @@ impl User {
         Ok(Self {
             id: Uuid::now_v7(),
             name,
-            // セッション ID は暗号論的乱数で生成する。UUIDv7 を使ってはならない (§3.6)。
+            // セッション ID は暗号論的乱数で生成する。UUIDv7 を使ってはならない (仕様「セッション」)。
             session_id: Uuid::new_v4(),
             last_seen: 0,
         })
@@ -126,28 +126,28 @@ pub struct Room {
     pub id: Uuid,
     pub number: RoomNumber,
     pub version: String,
-    /// 部屋の人数の上限 (§3.3)。
+    /// 部屋の人数の上限 (仕様「ユーザー」)。
     pub size: usize,
     pub created_at: Instant,
-    /// ゲームを開始した時刻。ロビーの間は `None` (§3.1)。
+    /// ゲームを開始した時刻。ロビーの間は `None` (仕様「部屋の状態」)。
     pub started_at: Option<Instant>,
-    /// ID 昇順。先頭が部屋主 (§3.4)。
+    /// ID 昇順。先頭が部屋主 (仕様「部屋主」)。
     pub users: Vec<User>,
-    /// 遅延参加者へ渡す初期状態 (§2.9)。サーバーは中身を解釈しない (§1.2)。
+    /// 遅延参加者へ渡す初期状態 (仕様「room_info」)。サーバーは中身を解釈しない (仕様「非責務」)。
     pub info: Value,
-    /// 部屋主が送ってきた次の `info`。レコードの締め切り時に反映する (§2.9)。
+    /// 部屋主が送ってきた次の `info`。レコードの締め切り時に反映する (仕様「room_info」)。
     info_update: Option<Value>,
     /// 現在イベントを受け付けているレコードの tick 番号。
     open_tick: u64,
     /// 開いているレコードへ送信者ごとに溜めたイベント。
     pending: HashMap<Uuid, Pending>,
-    /// 締め切り済みのレコード。古いものから捨てる (§2.6)。
+    /// 締め切り済みのレコード。古いものから捨てる (仕様「配送」)。
     closed: VecDeque<Record>,
-    /// 直前のレコードに間に合わなかったユーザー (§2.7)。バリアの待機対象から外す。
+    /// 直前のレコードに間に合わなかったユーザー (仕様「遅延・不在・脱落・復帰」)。バリアの待機対象から外す。
     absent: HashSet<Uuid>,
-    /// 保持期間から落ちたレコードまでの累計配信数 (§2.10)。
+    /// 保持期間から落ちたレコードまでの累計配信数 (仕様「desync 検出」)。
     delivered_before: HashMap<Uuid, u64>,
-    /// 食い違いを検出したか (§2.10)。一度立てば全員に通知し続ける。
+    /// 食い違いを検出したか (仕様「desync 検出」)。一度立てば全員に通知し続ける。
     desync: bool,
     /// 締め切りを待っているリクエストを起こす。値は最後に締め切った tick。
     closed_notify: watch::Sender<Option<u64>>,
@@ -161,7 +161,7 @@ struct Pending {
 }
 
 impl Room {
-    /// 部屋の人数として許される範囲 (§3.3)。
+    /// 部屋の人数として許される範囲 (仕様「ユーザー」)。
     const SIZE: std::ops::RangeInclusive<usize> = 2..=4;
 
     /// # Errors
@@ -199,7 +199,7 @@ impl Room {
         })
     }
 
-    /// 部屋そのものの期限 (§3.1)。ロビーは作成から、ゲームは開始から数える。
+    /// 部屋そのものの期限 (仕様「部屋の状態」)。ロビーは作成から、ゲームは開始から数える。
     fn lifetime_deadline(&self, config: &Config) -> Instant {
         match self.started_at {
             Some(started_at) => started_at + config.game_lifetime,
@@ -216,7 +216,7 @@ impl Room {
         self.open_tick
     }
 
-    /// 開いているレコードの期限 (§2.5)。絶対時刻で持つため、締め切りが早まっても後ろへずれない。
+    /// 開いているレコードの期限 (仕様「tick の進行」)。絶対時刻で持つため、締め切りが早まっても後ろへずれない。
     pub fn record_deadline(&self, tick: Duration) -> Instant {
         self.created_at + tick * u32::try_from(self.open_tick + 1).unwrap_or(u32::MAX)
     }
@@ -225,7 +225,7 @@ impl Room {
         self.closed_notify.subscribe()
     }
 
-    /// 期限の過ぎたレコードを締め切り、応答の途絶えたユーザーを外す (§2.5、§2.7)。
+    /// 期限の過ぎたレコードを締め切り、応答の途絶えたユーザーを外す (仕様「tick の進行」、仕様「遅延・不在・脱落・復帰」)。
     ///
     /// 返すのは無効になったセッション。
     pub fn advance(&mut self, tick: Duration, now: Instant, retention: usize) -> Vec<Uuid> {
@@ -235,7 +235,7 @@ impl Room {
         self.drop_silent(retention)
     }
 
-    /// 待機対象の全員が到着したか (§2.5)。不在のユーザーは待たない (§2.7)。
+    /// 待機対象の全員が到着したか (仕様「tick の進行」)。不在のユーザーは待たない (仕様「遅延・不在・脱落・復帰」)。
     pub fn everyone_arrived(&self) -> bool {
         !self.pending.is_empty()
             && self
@@ -245,7 +245,7 @@ impl Room {
                 .all(|user| self.pending.contains_key(&user.id))
     }
 
-    /// 開いているレコードを締め切り、同時に次を開く (§2.5)。
+    /// 開いているレコードを締め切り、同時に次を開く (仕様「tick の進行」)。
     pub fn close(&mut self) {
         let tick = self.open_tick;
         let pending = std::mem::take(&mut self.pending);
@@ -271,7 +271,7 @@ impl Room {
             reports.push((sender, events.reports));
             actions.push((sender, events.actions));
         }
-        // 部屋情報の差し替えも締め切りに合わせる。通知イベントと同じ境界で切り替わる (§2.9)。
+        // 部屋情報の差し替えも締め切りに合わせる。通知イベントと同じ境界で切り替わる (仕様「room_info」)。
         if let Some(info) = self.info_update.take() {
             self.info = info;
         }
@@ -308,7 +308,7 @@ impl Room {
             .unwrap_or(0)
     }
 
-    /// `next_tick` の直前までに配った累計 (§2.10)。
+    /// `next_tick` の直前までに配った累計 (仕様「desync 検出」)。
     ///
     /// クライアントは `next_tick` より前をすべて処理し終えているはずなので、
     /// その件数が `applied` と一致する。
@@ -323,7 +323,7 @@ impl Room {
         }
     }
 
-    /// クライアントの申告と突き合わせる (§2.10)。一度でも食い違えば以後は立ったまま。
+    /// クライアントの申告と突き合わせる (仕様「desync 検出」)。一度でも食い違えば以後は立ったまま。
     pub fn check_applied(&mut self, user: Uuid, next_tick: u64, applied: u64) {
         let expected = self.delivered_before_tick(user, next_tick);
         if applied != expected {
@@ -336,7 +336,7 @@ impl Room {
         self.desync
     }
 
-    /// 保持期間を超えたレコードを捨てる (§2.6)。
+    /// 保持期間を超えたレコードを捨てる (仕様「配送」)。
     pub fn trim(&mut self, retention: usize) {
         while self.closed.len() > retention {
             if let Some(dropped) = self.closed.pop_front() {
@@ -350,7 +350,7 @@ impl Room {
         self.closed.front().map(|record| record.tick)
     }
 
-    /// `next_tick` 以降の締め切り済みレコード (§2.6)。
+    /// `next_tick` 以降の締め切り済みレコード (仕様「配送」)。
     pub fn records_from(&self, next_tick: u64) -> impl Iterator<Item = &Record> {
         self.closed
             .iter()
@@ -367,7 +367,7 @@ impl Room {
         }
     }
 
-    /// 応答が途絶えたユーザーを部屋から除く (§2.7)。
+    /// 応答が途絶えたユーザーを部屋から除く (仕様「遅延・不在・脱落・復帰」)。
     ///
     /// 返すのは無効になったセッション。呼び出し側が登録簿から消す。
     /// 期間はレコードの保持数と揃える。仕様の 10 秒はどちらも同じ値であり、
@@ -393,12 +393,12 @@ impl Room {
         self.pending.contains_key(&user)
     }
 
-    /// 部屋主からの部屋情報を受け取る。反映は締め切り時 (§2.9)。
+    /// 部屋主からの部屋情報を受け取る。反映は締め切り時 (仕様「room_info」)。
     pub fn queue_info(&mut self, info: Value) {
         self.info_update = Some(info);
     }
 
-    /// 部屋主 (§3.4)。ユーザーは ID 昇順に並ぶため、先頭が該当する。
+    /// 部屋主 (仕様「部屋主」)。ユーザーは ID 昇順に並ぶため、先頭が該当する。
     pub fn owner_id(&self) -> Option<Uuid> {
         self.users.first().map(|user| user.id)
     }

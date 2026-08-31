@@ -26,7 +26,7 @@ use tokio::net::TcpListener;
 
 use crate::config::Config;
 
-/// 本文の上限 (仕様 §6.1)。これを超えるリクエストは読まずに拒む。
+/// 本文の上限 (仕様「上限の一覧」)。これを超えるリクエストは読まずに拒む。
 const BODY_LIMIT: usize = 1024 * 1024;
 
 /// ルーターが共有する状態。

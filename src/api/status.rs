@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::{AppState, msgpack::MsgPack};
 
-/// `GET /v3/status` の応答 (仕様 §4.6)。
+/// `GET /v3/status` の応答 (仕様「GET /v3/status」)。
 #[derive(Debug, Serialize)]
 pub struct Status {
     room_count: usize,

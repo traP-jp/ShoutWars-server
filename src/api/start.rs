@@ -1,4 +1,4 @@
-//! `POST /v3/room/start` (仕様 §4.5)。
+//! `POST /v3/room/start`。
 
 use axum::extract::State;
 use serde::{Deserialize, Serialize};

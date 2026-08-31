@@ -1,4 +1,4 @@
-//! HTTP のエンドポイント (仕様 §4)。
+//! HTTP のエンドポイント (仕様「API」)。
 
 pub mod create;
 pub mod join;

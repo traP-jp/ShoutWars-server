@@ -1,4 +1,4 @@
-//! `PASSWORD` による認証 (仕様 §4)。
+//! `PASSWORD` による認証 (仕様「API」)。
 
 use axum::{
     extract::{Request, State},

@@ -1,4 +1,4 @@
-//! `POST /v3/room/join` (仕様 §4.3)。
+//! `POST /v3/room/join`。
 
 use axum::extract::State;
 use rmpv::Value;
@@ -25,7 +25,7 @@ pub struct Response {
     user_id: Uuid,
     id: Uuid,
     room_info: Value,
-    /// 最初の同期で申告するカーソル (§2.6)。
+    /// 最初の同期で申告するカーソル (仕様「配送」)。
     next_tick: u64,
     tick_ms: u64,
 }

@@ -1,4 +1,4 @@
-//! `POST /v3/room/sync` (仕様 §4.4)。
+//! `POST /v3/room/sync`。
 
 use axum::extract::State;
 use rmpv::Value;
@@ -14,22 +14,22 @@ use crate::{
     rooms::{Deposit, Sync, SyncRequest},
 };
 
-/// 1 リクエストに載せられるイベントの件数 (§6.1)。
+/// 1 リクエストに載せられるイベントの件数 (仕様「上限の一覧」)。
 ///
 /// 正常なクライアントは到達しない。壊れたクライアントに対する防波堤である。
 const EVENT_LIMIT: usize = 64;
 
-/// 1 イベントの `data` のサイズ (§6.1)。
+/// 1 イベントの `data` のサイズ (仕様「上限の一覧」)。
 const DATA_LIMIT: usize = 8 * 1024;
 
-/// `room_info` のサイズ (§6.1)。
+/// `room_info` のサイズ (仕様「上限の一覧」)。
 const ROOM_INFO_LIMIT: usize = 64 * 1024;
 
 #[derive(Debug, Deserialize)]
 pub struct Request {
     session_id: Uuid,
     next_tick: u64,
-    /// 受け取って処理したイベントの累計 (§2.10)。
+    /// 受け取って処理したイベントの累計 (仕様「desync 検出」)。
     ///
     /// 既定値を持たせない。省略を 0 として扱うと、正常なクライアントが
     /// desync と判定される。届かなければ本文の不備として拒む。
@@ -38,14 +38,14 @@ pub struct Request {
     reports: Vec<Incoming>,
     #[serde(default)]
     actions: Vec<Incoming>,
-    /// 部屋主のみ有効 (§2.9)。
+    /// 部屋主のみ有効 (仕様「room_info」)。
     #[serde(default)]
     room_info: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct Response {
-    /// 次のリクエストにそのまま入れる値 (§2.6)。
+    /// 次のリクエストにそのまま入れる値 (仕様「配送」)。
     next_tick: u64,
     room_users: Vec<WireUser>,
     started: bool,
@@ -64,7 +64,7 @@ struct WireUser {
 #[derive(Debug, Serialize)]
 struct WireEvent {
     id: Uuid,
-    /// 最後のレコード以外に属する場合のみ入れる (§4.4)。
+    /// 最後のレコード以外に属する場合のみ入れる (仕様「POST /v3/room/sync」)。
     #[serde(skip_serializing_if = "Option::is_none")]
     tick: Option<u64>,
     from: Uuid,
@@ -86,7 +86,7 @@ impl WireEvent {
 }
 
 impl Response {
-    /// `next_tick` 以降のレコードをまとめる。少なくとも 1 件あることが前提 (§2.11)。
+    /// `next_tick` 以降のレコードをまとめる。少なくとも 1 件あることが前提 (仕様「サーバーが保証すること」)。
     fn build(room: &Room, user: Uuid, next_tick: u64) -> Self {
         let desync = room.is_desynced();
         let records: Vec<&Record> = room.records_from(next_tick).collect();
@@ -99,7 +99,7 @@ impl Response {
         let mut actions = Vec::new();
         for record in records {
             let tick = (record.tick != final_tick).then_some(record.tick);
-            // 報告イベントは送信者へ返さない (§2.2)。
+            // 報告イベントは送信者へ返さない (仕様「報告イベント」)。
             reports.extend(
                 record
                     .reports
@@ -107,7 +107,7 @@ impl Response {
                     .filter(|event| event.from != user)
                     .map(|event| WireEvent::new(event, tick)),
             );
-            // 確認イベントは送信者にも返す (§2.3)。
+            // 確認イベントは送信者にも返す (仕様「確認イベント」)。
             actions.extend(
                 record
                     .actions
@@ -189,7 +189,7 @@ fn check_count(name: &str, count: usize) -> Result<()> {
     Ok(())
 }
 
-/// 符号化した長さで測る。中身は解釈しない (§1.2)。
+/// 符号化した長さで測る。中身は解釈しない (仕様「非責務」)。
 fn check_size(name: &str, value: &Value, limit: usize) -> Result<()> {
     let size = rmp_serde::to_vec(value).map_err(|error| {
         tracing::error!(%error, "サイズを測れませんでした");

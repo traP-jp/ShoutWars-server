@@ -1,4 +1,4 @@
-//! `POST /v3/room/start` (仕様 §4.5)。
+//! `POST /v3/room/start`。
 
 mod common;
 
@@ -138,7 +138,7 @@ async fn 無効なセッションは拒む() {
         .send()
         .await;
 
-    // 部屋の存在に言及しない (§5.3)。
+    // 部屋の存在に言及しない (仕様「存在の秘匿について」)。
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
     assert_eq!(reply.error_code(), "invalid_session");
 }

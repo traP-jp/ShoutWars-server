@@ -1,4 +1,4 @@
-//! `GET /v3/status` (仕様 §4.6)。
+//! `GET /v3/status`。
 
 mod common;
 
