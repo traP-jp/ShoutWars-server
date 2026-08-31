@@ -13,6 +13,6 @@ pub(crate) struct Status {
 pub(crate) async fn status(State(state): State<AppState>) -> MsgPack<Status> {
     MsgPack(Status {
         room_count: 0, // TODO: 部屋の管理を実装したら差し替える
-        room_limit: state.room_limit,
+        room_limit: state.config.room_limit,
     })
 }

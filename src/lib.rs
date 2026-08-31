@@ -5,21 +5,26 @@
 //! ランタイムは単一スレッドで動かす。完全に I/O バウンドでサーバー側にゲームロジックが
 //! 無いため、マルチコアの恩恵が無い。並列実行を無くすことでデータ競合が原理的に起こらなくなる。
 
+mod auth;
 pub mod config;
+mod error;
 mod msgpack;
 mod status;
 
-use std::future::Future;
+use std::{future::Future, sync::Arc};
 
-use axum::{Router, routing::get};
+use axum::{Router, extract::DefaultBodyLimit, middleware, routing::get};
 use tokio::net::TcpListener;
 
 use crate::config::Config;
 
+/// 本文の上限 (仕様 §6.1)。これを超えるリクエストは読まずに拒む。
+const BODY_LIMIT: usize = 1024 * 1024;
+
 /// ルーターが共有する状態。
 #[derive(Debug, Clone)]
 pub(crate) struct AppState {
-    room_limit: usize,
+    config: Arc<Config>,
 }
 
 /// 設定からルーターを組み立てる。
@@ -27,10 +32,15 @@ pub(crate) struct AppState {
 /// 待ち受けと分離してあるのは、テストが任意の設定と空きポートで起動できるようにするため。
 pub fn app(config: &Config) -> Router {
     let state = AppState {
-        room_limit: config.room_limit,
+        config: Arc::new(config.clone()),
     };
     Router::new()
         .route("/v3/status", get(status::status))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_password,
+        ))
+        .layer(DefaultBodyLimit::max(BODY_LIMIT))
         .with_state(state)
 }
 

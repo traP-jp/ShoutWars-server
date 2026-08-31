@@ -1155,6 +1155,7 @@ dependencies = [
  "reqwest",
  "rmp-serde",
  "serde",
+ "subtle",
  "tokio",
  "tracing",
  "tracing-subscriber",

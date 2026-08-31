@@ -129,6 +129,12 @@ impl Request {
         Self(self.0.bearer_auth(password))
     }
 
+    /// ヘッダを直に指定する。`Authorization` の書式そのものを試すために使う。
+    #[must_use]
+    pub fn header(self, name: &str, value: &str) -> Self {
+        Self(self.0.header(name, value))
+    }
+
     pub async fn send(self) -> Reply {
         let response = self.0.send().await.expect("リクエストを送れません");
         let status = response.status();
@@ -169,13 +175,18 @@ impl Reply {
     }
 
     /// エラー本文を読み、`code` を返す (仕様 §5.1)。
+    ///
+    /// `message` が空でないことも確かめる。UI に表示される値であり、
+    /// 空だとクライアントが何も出せなくなる。
     pub fn error_code(&self) -> String {
         assert!(
             self.status.is_client_error() || self.status.is_server_error(),
             "エラーではないレスポンスです: {}",
             self.status
         );
-        self.msgpack::<ErrorBody>().error.code
+        let body: ErrorBody = self.msgpack();
+        assert!(!body.error.message.is_empty(), "message が空です");
+        body.error.code
     }
 }
 
