@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use shoutwars_server::config::Config;
 use tokio::net::TcpListener;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestServer {
     base_url: String,
     http: reqwest::Client,

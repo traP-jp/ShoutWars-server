@@ -11,11 +11,13 @@ use std::{
 };
 
 use rmpv::Value;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::{
     config::Config,
     error::Error,
+    record::Incoming,
     room::{Room, RoomNumber, User},
 };
 
@@ -102,13 +104,15 @@ impl Rooms {
             return Err(Error::RoomFull);
         }
 
+        // 参加者はいま開いているレコードから受け取る (§2.6)。
+        room.advance(self.config.tick, Instant::now());
         let user = User::new(name)?;
         let joined = Joined {
             session_id: user.session_id,
             user_id: user.id,
             room_id: room.id,
             room_info: room.info.clone(),
-            tick: room.current_tick(self.config.tick, Instant::now()),
+            tick: room.open_tick(),
         };
         self.sessions.insert(
             user.session_id,
@@ -149,6 +153,86 @@ impl Rooms {
         Ok(())
     }
 
+    /// 同期する (§4.4)。
+    ///
+    /// 返せるレコードがまだ無ければ [`Sync::Wait`] を返す。呼び出し側は期限か
+    /// 締め切りの通知を待って、もう一度呼ぶ。イベントは最初の 1 回だけ預ける。
+    ///
+    /// # Errors
+    /// セッションが無効、二重同期、保持期間外の `last_tick` などの場合。
+    pub fn sync(&mut self, request: SyncRequest) -> Result<Sync, Error> {
+        self.sweep();
+        let session = *self
+            .sessions
+            .get(&request.session_id)
+            .ok_or(Error::InvalidSession)?;
+        let tick = self.config.tick;
+        let retention = self.config.record_retention;
+        let room = self
+            .by_number
+            .get_mut(&session.room)
+            .ok_or(Error::RoomNotFound)?;
+
+        room.advance(tick, Instant::now());
+        room.trim(retention);
+        let is_owner = room.owner_id() == Some(session.user);
+
+        if let Some(deposit) = request.deposit {
+            if room.has_deposited(session.user) {
+                return Err(Error::AlreadySynced);
+            }
+            if request.last_tick > room.open_tick() {
+                return Err(Error::BadRequest(
+                    "last_tick が未来のレコードを指しています。".to_owned(),
+                ));
+            }
+            if room
+                .oldest_tick()
+                .is_some_and(|oldest| request.last_tick < oldest)
+            {
+                return Err(Error::SyncTooOld);
+            }
+            if is_owner && let Some(info) = deposit.room_info {
+                room.queue_info(info);
+            }
+            let attach = |events: Vec<Incoming>| {
+                events
+                    .into_iter()
+                    .map(|event| event.sent_by(session.user))
+                    .collect()
+            };
+            room.deposit(
+                session.user,
+                attach(deposit.reports),
+                attach(deposit.actions),
+            );
+            if room.everyone_arrived() {
+                room.close();
+                room.trim(retention);
+            }
+        }
+
+        if room.records_from(request.last_tick).next().is_some() {
+            return Ok(Sync::Ready(session.user));
+        }
+        Ok(Sync::Wait {
+            deadline: room.record_deadline(tick),
+            closed: room.subscribe(),
+        })
+    }
+
+    /// セッションが属する部屋。
+    ///
+    /// # Errors
+    /// セッションが無効、または部屋が消えている場合。
+    pub fn room_of(&self, session_id: Uuid) -> Result<&Room, Error> {
+        let session = self
+            .sessions
+            .get(&session_id)
+            .ok_or(Error::InvalidSession)?;
+        self.by_number.get(&session.room).ok_or(Error::RoomNotFound)
+    }
+
     /// 空いている部屋番号を引く。使用中なら引き直す (§3.2)。
     fn take_number(&self) -> Result<RoomNumber, Error> {
         (0..NUMBERING_ATTEMPTS)
@@ -156,6 +240,33 @@ impl Rooms {
             .find(|number| !self.by_number.contains_key(number))
             .ok_or(Error::RoomLimitReached)
     }
+}
+
+/// `sync` に預ける内容。
+#[derive(Debug)]
+pub struct SyncRequest {
+    pub session_id: Uuid,
+    pub last_tick: u64,
+    /// 2 回目以降の呼び出しでは `None`。イベントを二重に預けないため。
+    pub deposit: Option<Deposit>,
+}
+
+#[derive(Debug)]
+pub struct Deposit {
+    pub reports: Vec<Incoming>,
+    pub actions: Vec<Incoming>,
+    pub room_info: Option<Value>,
+}
+
+#[derive(Debug)]
+pub enum Sync {
+    /// 返せるレコードがある。値は送信者のユーザー ID。
+    Ready(Uuid),
+    /// まだ無い。期限か通知を待つ。
+    Wait {
+        deadline: Instant,
+        closed: watch::Receiver<Option<u64>>,
+    },
 }
 
 /// `join` の結果。部屋への借用を返さずに済むよう、必要な値だけ取り出す。

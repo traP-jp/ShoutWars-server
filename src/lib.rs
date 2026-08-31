@@ -10,8 +10,9 @@ mod auth;
 pub mod config;
 mod error;
 mod msgpack;
+mod record;
 mod room;
-mod rooms;
+pub mod rooms;
 
 use std::{future::Future, sync::Arc};
 
@@ -49,6 +50,7 @@ pub fn app(config: &Config) -> Router {
         .route("/v3/room/create", post(api::create::create))
         .route("/v3/room/join", post(api::join::join))
         .route("/v3/room/start", post(api::start::start))
+        .route("/v3/room/sync", post(api::sync::sync))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_password,

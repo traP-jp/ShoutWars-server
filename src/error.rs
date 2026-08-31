@@ -11,7 +11,6 @@ use crate::msgpack::MsgPack;
 /// `code` で分岐し `message` は表示にのみ使う、という契約を型で表す。
 /// 文言を変えてもクライアントの分岐が壊れない。
 #[derive(Debug)]
-#[expect(dead_code, reason = "各エンドポイントの実装とともに使い始める")]
 pub enum Error {
     /// リクエストの形式が不正。理由を添える。
     BadRequest(String),

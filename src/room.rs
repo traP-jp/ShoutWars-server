@@ -1,6 +1,7 @@
 //! 部屋とユーザー (仕様 §3)。
 
 use std::{
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     str::FromStr,
     time::{Duration, Instant},
@@ -8,9 +9,14 @@ use std::{
 
 use rmpv::Value;
 use serde::{Deserialize, Serialize, de};
+use tokio::sync::watch;
 use uuid::Uuid;
 
-use crate::{config::Config, error::Error};
+use crate::{
+    config::Config,
+    error::Error,
+    record::{Event, Record, UserSnapshot, merge},
+};
 
 /// 部屋番号 (仕様 §3.2)。口頭で伝えられるよう、部屋 ID とは別に持つ 6 桁の数字。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -83,7 +89,6 @@ impl<'de> Deserialize<'de> for RoomNumber {
 
 /// 部屋への 1 回の参加 (仕様 §3.3)。同一人物との対応は保証しない。
 #[derive(Debug)]
-#[expect(dead_code, reason = "sync が room_users で返すまで読まない")]
 pub struct User {
     /// UUIDv7。参加順に増えるため、昇順に並べると先頭が部屋主になる (§3.4)。
     pub id: Uuid,
@@ -127,6 +132,25 @@ pub struct Room {
     pub users: Vec<User>,
     /// 遅延参加者へ渡す初期状態 (§2.9)。サーバーは中身を解釈しない (§1.2)。
     pub info: Value,
+    /// 部屋主が送ってきた次の `info`。レコードの締め切り時に反映する (§2.9)。
+    info_update: Option<Value>,
+    /// 現在イベントを受け付けているレコードの tick 番号。
+    open_tick: u64,
+    /// 開いているレコードへ送信者ごとに溜めたイベント。
+    pending: HashMap<Uuid, Pending>,
+    /// 締め切り済みのレコード。古いものから捨てる (§2.6)。
+    closed: VecDeque<Record>,
+    /// 直前のレコードに間に合わなかったユーザー (§2.7)。バリアの待機対象から外す。
+    absent: HashSet<Uuid>,
+    /// 締め切りを待っているリクエストを起こす。値は最後に締め切った tick。
+    closed_notify: watch::Sender<Option<u64>>,
+}
+
+/// 開いているレコードへ、ある送信者が溜めたイベント。
+#[derive(Debug, Default)]
+struct Pending {
+    reports: Vec<Event>,
+    actions: Vec<Event>,
 }
 
 impl Room {
@@ -157,11 +181,17 @@ impl Room {
             started_at: None,
             users: vec![owner],
             info: Value::Nil,
+            info_update: None,
+            open_tick: 0,
+            pending: HashMap::new(),
+            closed: VecDeque::new(),
+            absent: HashSet::new(),
+            closed_notify: watch::Sender::new(None),
         })
     }
 
-    /// 期限 (§3.1)。ロビーは作成から、ゲームは開始から数える。
-    fn deadline(&self, config: &Config) -> Instant {
+    /// 部屋そのものの期限 (§3.1)。ロビーは作成から、ゲームは開始から数える。
+    fn lifetime_deadline(&self, config: &Config) -> Instant {
         match self.started_at {
             Some(started_at) => started_at + config.game_lifetime,
             None => self.created_at + config.lobby_lifetime,
@@ -169,13 +199,115 @@ impl Room {
     }
 
     pub fn is_expired(&self, config: &Config, now: Instant) -> bool {
-        now >= self.deadline(config)
+        now >= self.lifetime_deadline(config)
     }
 
-    /// 現在の tick 番号 (§2.5)。窓 `N` は `[作成 + N × tick, 作成 + (N+1) × tick)`。
-    pub fn current_tick(&self, tick: Duration, now: Instant) -> u64 {
-        let elapsed = now.saturating_duration_since(self.created_at);
-        u64::try_from(elapsed.as_nanos() / tick.as_nanos()).unwrap_or(u64::MAX)
+    /// 現在イベントを受け付けているレコードの tick 番号。
+    pub fn open_tick(&self) -> u64 {
+        self.open_tick
+    }
+
+    /// 開いているレコードの期限 (§2.5)。絶対時刻で持つため、締め切りが早まっても後ろへずれない。
+    pub fn record_deadline(&self, tick: Duration) -> Instant {
+        self.created_at + tick * u32::try_from(self.open_tick + 1).unwrap_or(u32::MAX)
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<Option<u64>> {
+        self.closed_notify.subscribe()
+    }
+
+    /// 期限の過ぎたレコードを締め切る (§2.5)。
+    pub fn advance(&mut self, tick: Duration, now: Instant) {
+        while now >= self.record_deadline(tick) {
+            self.close();
+        }
+    }
+
+    /// 待機対象の全員が到着したか (§2.5)。不在のユーザーは待たない (§2.7)。
+    pub fn everyone_arrived(&self) -> bool {
+        !self.pending.is_empty()
+            && self
+                .users
+                .iter()
+                .filter(|user| !self.absent.contains(&user.id))
+                .all(|user| self.pending.contains_key(&user.id))
+    }
+
+    /// 開いているレコードを締め切り、同時に次を開く (§2.5)。
+    pub fn close(&mut self) {
+        let tick = self.open_tick;
+        let pending = std::mem::take(&mut self.pending);
+        self.absent = self
+            .users
+            .iter()
+            .map(|user| user.id)
+            .filter(|id| !pending.contains_key(id))
+            .collect();
+        let users = self
+            .users
+            .iter()
+            .map(|user| UserSnapshot {
+                id: user.id,
+                name: user.name.clone(),
+                absent: self.absent.contains(&user.id),
+            })
+            .collect();
+
+        let mut reports = Vec::new();
+        let mut actions = Vec::new();
+        for (sender, events) in pending {
+            reports.push((sender, events.reports));
+            actions.push((sender, events.actions));
+        }
+        // 部屋情報の差し替えも締め切りに合わせる。通知イベントと同じ境界で切り替わる (§2.9)。
+        if let Some(info) = self.info_update.take() {
+            self.info = info;
+        }
+
+        self.closed.push_back(Record {
+            tick,
+            reports: merge(tick, reports),
+            actions: merge(tick, actions),
+            users,
+            started: self.started_at.is_some(),
+        });
+        self.open_tick += 1;
+        let _ = self.closed_notify.send(Some(tick));
+    }
+
+    /// 保持期間を超えたレコードを捨てる (§2.6)。
+    pub fn trim(&mut self, retention: usize) {
+        while self.closed.len() > retention {
+            self.closed.pop_front();
+        }
+    }
+
+    /// 保持している最も古いレコードの tick 番号。
+    pub fn oldest_tick(&self) -> Option<u64> {
+        self.closed.front().map(|record| record.tick)
+    }
+
+    /// `last_tick` 以降の締め切り済みレコード (§2.6)。
+    pub fn records_from(&self, last_tick: u64) -> impl Iterator<Item = &Record> {
+        self.closed
+            .iter()
+            .filter(move |record| record.tick >= last_tick)
+    }
+
+    /// 開いているレコードへイベントを預ける。
+    pub fn deposit(&mut self, from: Uuid, reports: Vec<Event>, actions: Vec<Event>) {
+        let pending = self.pending.entry(from).or_default();
+        pending.reports.extend(reports);
+        pending.actions.extend(actions);
+    }
+
+    pub fn has_deposited(&self, user: Uuid) -> bool {
+        self.pending.contains_key(&user)
+    }
+
+    /// 部屋主からの部屋情報を受け取る。反映は締め切り時 (§2.9)。
+    pub fn queue_info(&mut self, info: Value) {
+        self.info_update = Some(info);
     }
 
     /// 部屋主 (§3.4)。ユーザーは ID 昇順に並ぶため、先頭が該当する。
