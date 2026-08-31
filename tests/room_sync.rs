@@ -49,6 +49,11 @@ struct Sync {
     room_info: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct Status {
+    room_count: usize,
+}
+
 /// `applied` を欠いた本文。
 #[derive(Debug, Serialize)]
 struct 申告なし {
@@ -703,4 +708,20 @@ async fn 本文が大きすぎれば読まずに拒む() {
     // 1 MiB を超えるため、本文を復号する前に落ちる (§6.1)。
     assert_eq!(reply.status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(reply.error_code(), "limit_exceeded");
+}
+
+#[tokio::test]
+async fn 全員が脱落した部屋は消える() {
+    let Some(server) = TestServer::with_config(設定()).await else {
+        return;
+    };
+    let alice = 部屋を作る(&server, 2).await;
+
+    // Alice が同期を止めれば、保持数を超えたところで部屋には誰もいなくなる。
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let reply = 送る(&server, &同期(&alice.session_id, 0)).await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+
+    let status: Status = server.get("/v3/status").send().await.msgpack();
+    assert_eq!(status.room_count, 0, "誰もいない部屋が残っています");
 }

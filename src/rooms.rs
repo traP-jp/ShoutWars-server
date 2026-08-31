@@ -138,8 +138,14 @@ impl Rooms {
         let room = self.by_number.get_mut(&number).ok_or(Error::RoomNotFound)?;
         let dropped = room.advance(tick, Instant::now(), retention);
         room.trim(retention);
+        let empty = room.users.is_empty();
         for id in dropped {
             self.sessions.remove(&id);
+        }
+        // 全員が脱落した部屋は誰も同期しない。期限まで番号を抱えたままにしない。
+        if empty {
+            self.by_number.remove(&number);
+            tracing::info!(%number, "誰もいなくなった部屋を削除しました");
         }
         Ok(())
     }
