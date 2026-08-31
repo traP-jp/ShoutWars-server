@@ -10,6 +10,11 @@ pub struct Config {
     pub room_limit: usize,
     pub lobby_lifetime: Duration,
     pub game_lifetime: Duration,
+    /// tick の幅 (仕様 §2.5)。参加時の応答で `tick_ms` として通知する。
+    pub tick: Duration,
+    /// 部屋ごとに保持する同期レコードの数 (仕様 §2.6)。
+    /// これより古い `last_tick` は追いつけない。
+    pub record_retention: usize,
 }
 
 #[derive(Debug)]
@@ -35,6 +40,8 @@ impl Default for Config {
             room_limit: 100,
             lobby_lifetime: Duration::from_mins(10),
             game_lifetime: Duration::from_mins(20),
+            tick: Duration::from_millis(100),
+            record_retention: 100,
         }
     }
 }
@@ -52,8 +59,19 @@ impl Config {
             room_limit: positive("ROOM_LIMIT", default.room_limit)?,
             lobby_lifetime: minutes("LOBBY_LIFETIME", default.lobby_lifetime)?,
             game_lifetime: minutes("GAME_LIFETIME", default.game_lifetime)?,
+            tick: millis("TICK_MS", default.tick)?,
+            record_retention: positive("RECORD_RETENTION", default.record_retention)?,
         })
     }
+}
+
+/// ミリ秒単位で指定される時間を読む。
+fn millis(name: &'static str, default: Duration) -> Result<Duration, ConfigError> {
+    let ms: u64 = default
+        .as_millis()
+        .try_into()
+        .expect("既定値がミリ秒として大きすぎます");
+    Ok(Duration::from_millis(positive(name, ms)?))
 }
 
 /// 分単位で指定される時間を読む。

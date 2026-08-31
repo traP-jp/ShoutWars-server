@@ -16,24 +16,33 @@ fn 起動を試す(name: &str, value: &str) -> (Option<i32>, String) {
     )
 }
 
+fn 起動しないことを確かめる(cases: &[(&str, &str)]) {
+    for (name, value) in cases {
+        let (code, stderr) = 起動を試す(name, value);
+        assert_eq!(code, Some(1), "{name}={value} で起動してしまいました");
+        assert!(
+            stderr.contains(name),
+            "{name}={value} の出力から原因が分かりません: {stderr}"
+        );
+    }
+}
+
 #[test]
 fn 解釈できない値では起動しない() {
-    let (code, stderr) = 起動を試す("ROOM_LIMIT", "abc");
-
-    assert_eq!(code, Some(1));
-    assert!(
-        stderr.contains("ROOM_LIMIT"),
-        "原因が分からない出力: {stderr}"
-    );
+    起動しないことを確かめる(&[
+        ("PORT", "ななよんろくはち"),
+        ("ROOM_LIMIT", "abc"),
+        ("TICK_MS", "1.5"),
+        ("LOBBY_LIFETIME", ""),
+    ]);
 }
 
 #[test]
 fn 範囲外の値では起動しない() {
-    let (code, stderr) = 起動を試す("ROOM_LIMIT", "0");
-
-    assert_eq!(code, Some(1));
-    assert!(
-        stderr.contains("ROOM_LIMIT"),
-        "原因が分からない出力: {stderr}"
-    );
+    起動しないことを確かめる(&[
+        ("ROOM_LIMIT", "0"),
+        ("TICK_MS", "0"),
+        ("RECORD_RETENTION", "0"),
+        ("GAME_LIFETIME", "0"),
+    ]);
 }
