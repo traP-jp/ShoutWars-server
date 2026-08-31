@@ -21,7 +21,6 @@ use crate::{
 
 /// セッションが指す先 (§3.6)。
 #[derive(Debug, Clone, Copy)]
-#[expect(dead_code, reason = "sync と start の実装で読む")]
 pub struct Session {
     pub room: RoomNumber,
     pub user: Uuid,
@@ -122,6 +121,32 @@ impl Rooms {
         // ユーザー ID は UUIDv7 で単調に増えるため、末尾へ足せば昇順が保たれる (§3.4)。
         room.users.push(user);
         Ok(joined)
+    }
+
+    /// ゲームを開始する (§4.5)。
+    ///
+    /// # Errors
+    /// セッションが無効、部屋主でない、または既に開始している場合。
+    pub fn start(&mut self, session_id: Uuid) -> Result<(), Error> {
+        self.sweep();
+        // セッションの検証を先に行い、部屋の存在に言及しない (§5.3)。
+        let session = *self
+            .sessions
+            .get(&session_id)
+            .ok_or(Error::InvalidSession)?;
+        let room = self
+            .by_number
+            .get_mut(&session.room)
+            .ok_or(Error::RoomNotFound)?;
+        if room.owner_id() != Some(session.user) {
+            return Err(Error::NotOwner);
+        }
+        if room.started_at.is_some() {
+            return Err(Error::GameStarted);
+        }
+        room.started_at = Some(Instant::now());
+        tracing::info!(id = %room.id, number = %room.number, "ゲームを開始しました");
+        Ok(())
     }
 
     /// 空いている部屋番号を引く。使用中なら引き直す (§3.2)。

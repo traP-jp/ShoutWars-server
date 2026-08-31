@@ -178,6 +178,11 @@ impl Room {
         u64::try_from(elapsed.as_nanos() / tick.as_nanos()).unwrap_or(u64::MAX)
     }
 
+    /// 部屋主 (§3.4)。ユーザーは ID 昇順に並ぶため、先頭が該当する。
+    pub fn owner_id(&self) -> Option<Uuid> {
+        self.users.first().map(|user| user.id)
+    }
+
     pub fn is_full(&self) -> bool {
         self.users.len() >= self.size
     }
