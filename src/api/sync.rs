@@ -169,14 +169,11 @@ pub async fn sync(
                     let room = rooms.room_of(session_id)?;
                     return Ok(MsgPack(Response::build(room, user, next_tick)));
                 }
-                SyncOutcome::Wait { deadline, closed } => (deadline, closed),
+                SyncOutcome::Wait { deadline } => deadline,
             }
         };
-        let (deadline, mut closed) = waiting;
-        tokio::select! {
-            _ = closed.changed() => {}
-            () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {}
-        }
+        // レコードは期限にしか閉じないため、期限まで眠れば必ず起きられる。
+        tokio::time::sleep_until(tokio::time::Instant::from_std(waiting)).await;
     }
 }
 

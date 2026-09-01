@@ -11,7 +11,6 @@ use std::{
 };
 
 use rmpv::Value;
-use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::{
@@ -180,7 +179,7 @@ impl Inner {
     /// 同期する。
     ///
     /// 返せるレコードがまだ無ければ [`SyncOutcome::Wait`] を返す。
-    /// 呼び出し側は期限か締め切りの通知を待って、もう一度呼ぶ。イベントは最初の 1 回だけ預ける。
+    /// 呼び出し側は期限まで待って、もう一度呼ぶ。イベントは最初の 1 回だけ預ける。
     ///
     /// # Errors
     /// セッションが無効、二重同期、保持期間外の `next_tick` などの場合。
@@ -240,7 +239,6 @@ impl Inner {
         }
         Ok(SyncOutcome::Wait {
             deadline: room.record_deadline(tick),
-            closed: room.subscribe(),
         })
     }
 
@@ -291,11 +289,8 @@ pub struct Deposit {
 pub enum SyncOutcome {
     /// 返せるレコードがある。値は送信者のユーザー ID。
     Ready(Uuid),
-    /// まだ無い。期限か通知を待つ。
-    Wait {
-        deadline: Instant,
-        closed: watch::Receiver<Option<u64>>,
-    },
+    /// まだ無い。開いているレコードの期限まで待つ。
+    Wait { deadline: Instant },
 }
 
 /// `join` の結果。部屋への借用を返さずに済むよう、必要な値だけ取り出す。

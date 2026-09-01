@@ -9,7 +9,6 @@ use std::{
 
 use rmpv::Value;
 use serde::{Deserialize, Serialize, de};
-use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::{
@@ -147,8 +146,6 @@ pub struct Room {
     delivered_before: HashMap<Uuid, u64>,
     /// 食い違いを検出したか。一度立てば全員に通知し続ける。
     desync: bool,
-    /// 締め切りを待っているリクエストを起こす。値は最後に締め切った tick。
-    closed_notify: watch::Sender<Option<u64>>,
 }
 
 /// 開いているレコードへ、ある送信者が溜めたイベント。
@@ -192,7 +189,6 @@ impl Room {
             closed: VecDeque::new(),
             delivered_before: HashMap::new(),
             desync: false,
-            closed_notify: watch::Sender::new(None),
         })
     }
 
@@ -216,10 +212,6 @@ impl Room {
     /// 開いているレコードの期限。絶対時刻で持つため、締め切りが早まっても後ろへずれない。
     pub fn record_deadline(&self, tick: Duration) -> Instant {
         self.created_at + tick * u32::try_from(self.open_tick + 1).unwrap_or(u32::MAX)
-    }
-
-    pub fn subscribe(&self) -> watch::Receiver<Option<u64>> {
-        self.closed_notify.subscribe()
     }
 
     /// 期限の過ぎたレコードを締め切り、応答の途絶えたユーザーを外す。
@@ -275,7 +267,6 @@ impl Room {
             .collect();
         self.closed.push_back(record);
         self.open_tick += 1;
-        let _ = self.closed_notify.send(Some(tick));
     }
 
     /// 最後に締め切ったレコードまでの累計配信数。
