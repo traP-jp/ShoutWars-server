@@ -67,16 +67,7 @@ push と pull request では `.github/workflows/ci.yml` が同じものを回す
 
 `TICK_MS` と `RECORD_RETENTION` を短くすると、時間に依存する振る舞いを実時間を待たずにテストできる。運用時に既定値から変える必要は無い。
 
-`ROOM_LIMIT` は、サーバーが同時に処理できる部屋数を超えて設定してはならない。超える値が指定された場合は、起動時に警告するか拒否する。
-
-## デプロイ
-
-NeoShowcase 上で 2 つ動いています。ブランチへの push で自動デプロイされ、ビルドはリポジトリ直下の `Dockerfile` で行われます。
-
-| 環境 | ブランチ | 環境変数 |
-|---|---|---|
-| 本番 | `main` | `ROOM_LIMIT=20` |
-| 開発 | `develop` | `PASSWORD` 設定あり、`ROOM_LIMIT=10` |
+メモリの消費量は `ROOM_LIMIT` × `ROOM_MEMORY_LIMIT` で頭打ちになる。この積が、サーバーに割り当てたメモリに収まるように決めること。
 
 ## API 仕様
 
