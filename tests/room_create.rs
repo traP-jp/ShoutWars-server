@@ -249,3 +249,29 @@ async fn does_not_count_expired_rooms() {
 
     assert_eq!(status.room_count, 0, "期限切れの部屋が残っています");
 }
+
+#[tokio::test]
+async fn the_session_id_is_not_a_uuidv7() {
+    let server = TestServer::start().await;
+
+    let created: Created = server
+        .post("/v3/room/create", &create_request("Alice", 2))
+        .send()
+        .await
+        .expect_ok();
+
+    // セッション ID は予測できてはならない。UUIDv7 は先頭 48 bit が時刻で秘密にならない。
+    let session = Uuid::parse_str(&created.session_id).expect("UUID として読める");
+    assert_eq!(
+        session.get_version_num(),
+        4,
+        "セッション ID が UUIDv4 ではありません"
+    );
+    // ユーザー ID は逆に、参加順に増えなければならない。
+    let user = Uuid::parse_str(&created.user_id).expect("UUID として読める");
+    assert_eq!(
+        user.get_version_num(),
+        7,
+        "ユーザー ID が UUIDv7 ではありません"
+    );
+}

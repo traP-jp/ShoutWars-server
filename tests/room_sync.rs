@@ -852,3 +852,125 @@ async fn resending_does_not_duplicate_an_event() {
     let count = synced.actions.iter().filter(|e| e.id == id).count();
     assert_eq!(count, 1, "同じ event が {count} 回届きました");
 }
+
+#[tokio::test]
+async fn events_from_one_sender_keep_their_order() {
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+
+    let mut body = sync_request(&alice.session_id, 0);
+    body.actions = (0..5).map(|i| event("attack", &i.to_string())).collect();
+    let sent: Vec<String> = body.actions.iter().map(|e| e.id.clone()).collect();
+    let synced: Synced = post_sync(&server, &body).await.expect_ok();
+
+    let received: Vec<String> = synced.actions.iter().map(|e| e.id.clone()).collect();
+    assert_eq!(received, sent, "同一送信者内の順序が崩れています");
+    let data: Vec<&str> = synced.actions.iter().map(|e| e.data.as_str()).collect();
+    assert_eq!(data, ["0", "1", "2", "3", "4"], "中身が入れ替わっています");
+}
+
+#[tokio::test]
+async fn room_users_are_sorted_by_id_with_the_owner_first() {
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
+    let alice = create_room(&server, 4).await;
+    join_room(&server, &alice.code(), "Bob").await;
+    join_room(&server, &alice.code(), "Charlie").await;
+
+    let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
+        .await
+        .expect_ok();
+
+    let ids: Vec<&str> = synced.room_users.iter().map(|u| u.id.as_str()).collect();
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    assert_eq!(ids, sorted, "ユーザー一覧が ID 昇順ではありません");
+    assert_eq!(
+        synced.room_users[0].id, alice.user_id,
+        "先頭が部屋主ではありません"
+    );
+    assert_eq!(synced.room_users[0].name, "Alice");
+}
+
+#[tokio::test]
+async fn a_response_does_not_arrive_before_the_deadline() {
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
+    // 部屋の人数ぶん全員が預けても、窓の終わりまで締め切ってはならない。
+    let alice = create_room(&server, 2).await;
+    let bob = join_room(&server, &alice.code(), "Bob").await;
+
+    let (from_alice, from_bob) = (
+        sync_request(&alice.session_id, 0),
+        sync_request(&bob.session_id, 0),
+    );
+    let started = std::time::Instant::now();
+    let both = tokio::join!(
+        post_sync(&server, &from_alice),
+        post_sync(&server, &from_bob),
+    );
+    let elapsed = started.elapsed();
+
+    assert_eq!(both.0.status, StatusCode::OK);
+    assert_eq!(both.1.status, StatusCode::OK);
+    assert!(
+        elapsed >= config().tick / 2,
+        "全員到着で早く締め切っています: {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_session_expires_with_its_room() {
+    let Some(server) = TestServer::with_config(Config {
+        lobby_lifetime: Duration::from_millis(50),
+        ..config()
+    })
+    .await
+    else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+    tokio::time::sleep(Duration::from_millis(80)).await;
+
+    let reply = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
+
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(reply.error_code(), "invalid_session");
+}
+
+#[tokio::test]
+async fn a_started_game_expires_on_its_own_lifetime() {
+    let Some(server) = TestServer::with_config(Config {
+        // ロビーは長く、ゲームは短く。開始後の期限が使われることを分ける。
+        lobby_lifetime: Duration::from_secs(60),
+        game_lifetime: Duration::from_millis(50),
+        ..config()
+    })
+    .await
+    else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+    server
+        .post(
+            "/v3/room/start",
+            &Start {
+                session_id: alice.session_id.clone(),
+            },
+        )
+        .send()
+        .await;
+    tokio::time::sleep(Duration::from_millis(80)).await;
+
+    let reply = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
+
+    assert_eq!(
+        reply.status,
+        StatusCode::UNAUTHORIZED,
+        "ゲームの期限が効いていません"
+    );
+}

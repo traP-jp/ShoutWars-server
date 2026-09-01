@@ -117,3 +117,28 @@ async fn rejects_other_schemes() {
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
     assert_eq!(reply.error_code(), "unauthorized");
 }
+
+/// 認証はルーター全体に掛かっていなければならない。
+///
+/// `GET /v3/status` だけで試すと、同期の経路が素通しになっていても気づけない。
+#[tokio::test]
+async fn every_endpoint_requires_the_password() {
+    let Some(server) = TestServer::with_config(config_with_auth()).await else {
+        return;
+    };
+
+    for path in [
+        "/v3/room/create",
+        "/v3/room/join",
+        "/v3/room/sync",
+        "/v3/room/start",
+    ] {
+        let reply = server.post(path, &()).send().await;
+        assert_eq!(
+            reply.status,
+            StatusCode::UNAUTHORIZED,
+            "{path} が素通ししました"
+        );
+        assert_eq!(reply.error_code(), "unauthorized", "{path}");
+    }
+}
