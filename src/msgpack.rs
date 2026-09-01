@@ -10,8 +10,8 @@ use crate::error::Error;
 
 /// serde の human-readable 表現を選ぶ。
 ///
-/// MessagePack 自体は人が読む形式ではないが、この切り替えは
-/// 「コンパクトな表現」と「読める表現」のどちらを使うかを型に伝えるものであり、
+/// MessagePack 自体は人が読む形式ではないが、
+/// この切り替えは「コンパクトな表現」と「読める表現」のどちらを使うかを型に伝えるものであり、
 /// UUID を 16 バイトの配列ではなく文字列として符号化させるために要る。
 /// 仕様が `uuid` を「UUID の文字列表現」と定めているため、こちらを選ぶ。
 fn to_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, rmp_serde::encode::Error> {

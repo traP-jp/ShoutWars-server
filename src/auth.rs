@@ -38,8 +38,8 @@ pub async fn require_password(
 
 /// `Bearer <token>` からトークンを取り出す。スキーム名は大文字小文字を区別しない。
 ///
-/// ヘッダ値を文字列として解釈しない。可視 ASCII 以外を含むパスワードでも
-/// そのまま比較できるようにするため、バイト列のまま扱う。
+/// ヘッダ値を文字列として解釈しない。
+/// 可視 ASCII 以外を含むパスワードでもそのまま比較できるようにするため、バイト列のまま扱う。
 fn bearer(value: &[u8]) -> Option<&[u8]> {
     let index = value.iter().position(|byte| *byte == b' ')?;
     let (scheme, token) = value.split_at(index);

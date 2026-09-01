@@ -10,8 +10,8 @@ use shoutwars_server::config::Config;
 
 const PASSWORD: &str = "correct horse battery staple";
 
-/// ヘッダ値は可視 ASCII しか文字列として読めない。バイト列のまま比較していないと
-/// この形のパスワードが常に拒否される。
+/// ヘッダ値は可視 ASCII しか文字列として読めない。
+/// バイト列のまま比較していないとこの形のパスワードが常に拒否される。
 const NON_ASCII_PASSWORD: &str = "テスト用のパスワード";
 
 fn config_with_auth() -> Config {
