@@ -17,6 +17,13 @@ traP ワンマンソン 2024 レジェンドクリエイターズのゲーム
 cargo build --release
 ```
 
+コンテナで動かす場合は `Dockerfile` を使います。デプロイ先と同じものが手元で再現できます。
+
+```sh
+docker build -t shoutwars-server .
+docker run -p 7468:7468 shoutwars-server
+```
+
 ## 起動方法
 
 ```sh
@@ -63,7 +70,7 @@ TEST_SERVER_URL=https://example.com TEST_SERVER_PASSWORD=... cargo test
 
 ## デプロイ
 
-NeoShowcase 上で 2 つ動いています。ブランチへの push で自動デプロイされます。
+NeoShowcase 上で 2 つ動いています。ブランチへの push で自動デプロイされ、ビルドはリポジトリ直下の `Dockerfile` で行われます。
 
 | 環境 | ブランチ | 環境変数 |
 |---|---|---|
