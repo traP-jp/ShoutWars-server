@@ -23,7 +23,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
     let address = SocketAddr::from((Ipv4Addr::UNSPECIFIED, config.port));
     let listener = TcpListener::bind(address).await?;
-    tracing::info!(%address, "起動しました");
+    // 基盤が渡した設定を確かめられるようにする。
+    // パスワードは有無だけを出す。設定漏れと値の誤りを切り分けられれば足りる。
+    tracing::info!(
+        %address,
+        password = config.password.is_some(),
+        room_limit = config.room_limit,
+        lobby_lifetime = ?config.lobby_lifetime,
+        game_lifetime = ?config.game_lifetime,
+        tick_ms = config.tick_ms(),
+        record_retention = config.record_retention,
+        "起動しました"
+    );
 
     serve(listener, app(&config), async {
         let _ = tokio::signal::ctrl_c().await;
