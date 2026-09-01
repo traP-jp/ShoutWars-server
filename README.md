@@ -48,7 +48,7 @@ TEST_SERVER_URL=https://example.com TEST_SERVER_PASSWORD=... cargo test
 
 このとき、サーバーの設定に依存するテストは設定を制御できないため実行されない。
 
-未実装の機能に対するテストは `#[ignore]` を付けてある。`cargo test -- --ignored` で残りを確認できる。
+push と pull request では `.github/workflows/ci.yml` が同じものを回す。あわせて Dockerfile のビルドと `cargo audit` も確認する。
 
 ## 環境変数
 
