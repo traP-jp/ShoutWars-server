@@ -61,6 +61,7 @@ push と pull request では `.github/workflows/ci.yml` が同じものを回す
 | `GAME_LIFETIME` | `20` 分 | 各部屋のゲームの制限時間 |
 | `TICK_MS` | `100` ミリ秒 | tick の幅。参加時の応答でクライアントへ通知する |
 | `RECORD_RETENTION` | `100` | 部屋ごとに保持する同期レコードの数 |
+| `ROOM_MEMORY_LIMIT` | `4` | 部屋ごとに保持するイベントの合計 (MiB) |
 
 いずれも起動時に検証する。解釈できない値や範囲外の値は、既定値へ黙ってフォールバックせず、エラーで起動を中止する。
 

@@ -139,9 +139,10 @@ impl Inner {
     /// 部屋が無い場合。
     fn refresh(&mut self, number: RoomNumber) -> Result<(), Error> {
         let (tick, retention) = (self.config.tick, self.config.record_retention);
+        let byte_limit = self.config.room_memory_limit;
         let room = self.by_number.get_mut(&number).ok_or(Error::RoomNotFound)?;
         let dropped = room.advance(tick, Instant::now(), retention);
-        room.trim(retention);
+        room.trim(retention, byte_limit);
         let empty = room.users.is_empty();
         for id in dropped {
             self.sessions.remove(&id);

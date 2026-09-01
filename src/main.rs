@@ -33,6 +33,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         game_lifetime = ?config.game_lifetime,
         tick_ms = config.tick_ms(),
         record_retention = config.record_retention,
+        room_memory_limit = config.room_memory_limit,
         "起動しました"
     );
 

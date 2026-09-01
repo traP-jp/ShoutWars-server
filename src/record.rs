@@ -16,6 +16,8 @@ pub struct Event {
     pub from: Uuid,
     pub kind: String,
     pub data: Value,
+    /// `data` を符号化した長さ。部屋の保持量を測るのに使う。
+    pub size: usize,
 }
 
 /// クライアントから届いたイベント。
@@ -27,6 +29,9 @@ pub struct Incoming {
     #[serde(rename = "type")]
     pub kind: String,
     pub data: Value,
+    /// 受け入れの検査で測った `data` の長さ。同じ値を二度符号化しないために持ち回る。
+    #[serde(skip)]
+    pub size: usize,
 }
 
 impl Incoming {
@@ -36,6 +41,7 @@ impl Incoming {
             from,
             kind: self.kind,
             data: self.data,
+            size: self.size,
         }
     }
 }
@@ -56,6 +62,8 @@ pub struct Record {
     pub actions: Vec<Event>,
     pub users: Vec<UserSnapshot>,
     pub started: bool,
+    /// このレコードが抱えるイベントの `data` の合計。
+    pub bytes: usize,
     /// このレコードまでにユーザーへ配った累計イベント数。
     ///
     /// 参加より前のぶんは数えない。クライアントの `applied` と突き合わせる。

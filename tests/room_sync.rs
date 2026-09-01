@@ -329,6 +329,43 @@ async fn rejects_a_cursor_that_is_too_old() {
 }
 
 #[tokio::test]
+async fn drops_old_records_once_the_room_holds_too_much() {
+    // 件数では切れない保持数にして、バイト数だけで切らせる。
+    let Some(server) = TestServer::with_config(Config {
+        tick: Duration::from_millis(50),
+        record_retention: 100,
+        room_memory_limit: 16 * 1024,
+        ..Config::default()
+    })
+    .await
+    else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+
+    let mut last = None;
+    for _ in 0..8 {
+        let mut body = sync_request(&alice.session_id, 0);
+        body.actions = vec![OutEvent {
+            id: Uuid::now_v7().to_string(),
+            kind: "attack".to_owned(),
+            data: "a".repeat(DATA_LIMIT),
+        }];
+        let reply = post_sync(&server, &body).await;
+        if reply.status != StatusCode::OK {
+            last = Some(reply);
+            break;
+        }
+        // 同じ窓へ二度送らないよう、tick 幅を空ける。
+        wait_ticks(&alice, 1.0).await;
+    }
+
+    let reply = last.expect("保持量を超えても古いレコードが残っています");
+    assert_eq!(reply.status, StatusCode::GONE);
+    assert_eq!(reply.error_code(), "sync_too_old");
+}
+
+#[tokio::test]
 async fn rejects_a_cursor_in_the_future() {
     let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;

@@ -136,12 +136,12 @@ impl Response {
 
 pub async fn sync(
     State(state): State<AppState>,
-    MsgPack(request): MsgPack<Request>,
+    MsgPack(mut request): MsgPack<Request>,
 ) -> Result<MsgPack<Response>> {
     check_count("reports", request.reports.len())?;
     check_count("actions", request.actions.len())?;
-    for event in request.reports.iter().chain(&request.actions) {
-        check_size("イベントの data", &event.data, DATA_LIMIT)?;
+    for event in request.reports.iter_mut().chain(&mut request.actions) {
+        event.size = check_size("イベントの data", &event.data, DATA_LIMIT)?;
     }
     if let Some(info) = &request.room_info {
         check_size("room_info", info, ROOM_INFO_LIMIT)?;
@@ -186,8 +186,10 @@ fn check_count(name: &str, count: usize) -> Result<()> {
     Ok(())
 }
 
-/// 符号化した長さで測る。中身は解釈しない。
-fn check_size(name: &str, value: &Value, limit: usize) -> Result<()> {
+/// 符号化した長さで測り、その長さを返す。中身は解釈しない。
+///
+/// 返す長さは保持量の集計に使う。捨ててしまうと、同じ値を測り直すことになる。
+fn check_size(name: &str, value: &Value, limit: usize) -> Result<usize> {
     let size = rmp_serde::to_vec(value).map_err(|error| {
         tracing::error!(%error, "サイズを測れませんでした");
         Error::Internal
@@ -198,5 +200,5 @@ fn check_size(name: &str, value: &Value, limit: usize) -> Result<()> {
             limit / 1024
         )));
     }
-    Ok(())
+    Ok(size.len())
 }

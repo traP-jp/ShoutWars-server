@@ -14,6 +14,11 @@ pub struct Config {
     pub tick: Duration,
     /// 部屋ごとに保持する同期レコードの数。これより古い `next_tick` は追いつけない。
     pub record_retention: usize,
+    /// 部屋ごとに保持するイベントの合計バイト数。超えた分は古いレコードから捨てる。
+    ///
+    /// 件数の上限だけでは、掛け合わせた量に上限が無く、上り帯域に比例して
+    /// メモリを取られる。この値により、消費量は部屋数との積で抑えられる。
+    pub room_memory_limit: usize,
 }
 
 #[derive(Debug)]
@@ -43,6 +48,8 @@ impl Default for Config {
             // 縮めた分だけリクエストの頻度が上がるだけになる。
             tick: Duration::from_millis(100),
             record_retention: 100,
+            // まっとうな 4 人部屋が保持期間いっぱいに使う量の 4 倍以上を見込む。
+            room_memory_limit: 4 * 1024 * 1024,
         }
     }
 }
@@ -68,8 +75,14 @@ impl Config {
             game_lifetime: minutes("GAME_LIFETIME", default.game_lifetime)?,
             tick: millis("TICK_MS", default.tick)?,
             record_retention: positive("RECORD_RETENTION", default.record_retention)?,
+            room_memory_limit: mib("ROOM_MEMORY_LIMIT", default.room_memory_limit)?,
         })
     }
+}
+
+/// MiB 単位で指定される大きさをバイト数で読む。
+fn mib(name: &'static str, default: usize) -> Result<usize, ConfigError> {
+    Ok(positive(name, default / (1024 * 1024))? * 1024 * 1024)
 }
 
 /// ミリ秒単位で指定される時間を読む。

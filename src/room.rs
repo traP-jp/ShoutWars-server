@@ -142,6 +142,8 @@ pub struct Room {
     pending: HashMap<Uuid, Pending>,
     /// 締め切り済みのレコード。古いものから捨てる。
     closed: VecDeque<Record>,
+    /// `closed` が抱えるイベントの合計バイト数。捨てる判断に使う。
+    bytes: usize,
     /// 保持しているレコードと、開いている窓にあるイベントの ID。
     ///
     /// 応答を取り損ねたクライアントは、確認できていないイベントを次の送信でもう一度
@@ -193,6 +195,7 @@ impl Room {
             open_tick: 0,
             pending: HashMap::new(),
             closed: VecDeque::new(),
+            bytes: 0,
             seen_events: HashSet::new(),
             delivered_before: HashMap::new(),
             desync: false,
@@ -269,12 +272,15 @@ impl Room {
             self.info = info;
         }
 
+        let (reports, actions) = (merge(tick, reports), merge(tick, actions));
+        let bytes = reports.iter().chain(&actions).map(|event| event.size).sum();
         let mut record = Record {
             tick,
-            reports: merge(tick, reports),
-            actions: merge(tick, actions),
+            reports,
+            actions,
             users,
             started: self.started_at.is_some(),
+            bytes,
             delivered: HashMap::new(),
         };
         record.delivered = self
@@ -285,6 +291,7 @@ impl Room {
                 (user.id, before + record.delivered_to(user.id))
             })
             .collect();
+        self.bytes += record.bytes;
         self.closed.push_back(record);
         self.open_tick += 1;
     }
@@ -333,10 +340,17 @@ impl Room {
         self.desync
     }
 
-    /// 保持期間を超えたレコードを捨てる。
-    pub fn trim(&mut self, retention: usize) {
-        while self.closed.len() > retention {
+    /// 保持しきれなくなったレコードを、古いほうから捨てる。
+    ///
+    /// 件数だけでなくバイト数でも切る。1 ユーザーが 1 つの窓に置ける量には上限があるが、
+    /// 掛け合わせた結果には上限が無く、上り帯域に比例してメモリを取られる。
+    /// 部屋ごとに切ることで、詰め込んだ側の保持期間が縮むだけに留まる。
+    ///
+    /// 最後の 1 件は残す。すべて捨てると、誰も追いつけない部屋になる。
+    pub fn trim(&mut self, retention: usize, byte_limit: usize) {
+        while self.closed.len() > 1 && (self.closed.len() > retention || self.bytes > byte_limit) {
             if let Some(dropped) = self.closed.pop_front() {
+                self.bytes -= dropped.bytes;
                 for event in dropped.reports.iter().chain(&dropped.actions) {
                     self.seen_events.remove(&event.id);
                 }
