@@ -139,7 +139,11 @@ async fn room_count_increases() {
         .await;
     let after: Status = server.get("/v3/status").send().await.msgpack();
 
-    assert_eq!(after.room_count, before.room_count + 1);
+    // 外部サーバーは他のテストと共有するため、増分がちょうど 1 とは限らない。
+    assert!(
+        after.room_count > before.room_count,
+        "部屋を作っても room_count が増えていません"
+    );
 }
 
 #[derive(Debug, Deserialize)]

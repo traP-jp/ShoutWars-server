@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use shoutwars_server::config::Config;
 use uuid::Uuid;
 
-/// テストは実時間を待つため、tick を仕様の 100 ms より大幅に短くする。
+/// レコードの保持数に依存するテスト専用。実時間を待つため tick も短くする。
+///
+/// これ以外は既定の設定で動く。待ち時間は応答の `tick_ms` から求めるので、
+/// 外部サーバーが相手でも同じテストが流れる。
 fn config() -> Config {
     Config {
         tick: Duration::from_millis(50),
@@ -80,6 +83,7 @@ struct Member {
     user_id: String,
     #[serde(default)]
     code: String,
+    tick_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,6 +156,13 @@ async fn join_room(server: &TestServer, code: &str, name: &str) -> Member {
         .msgpack()
 }
 
+/// レコードが `count` 個ぶん締め切られるまで待つ。
+///
+/// tick はサーバーの設定であり、こちらからは決められない。応答が教えてくれる値を使う。
+async fn wait_ticks(member: &Member, count: f64) {
+    tokio::time::sleep(Duration::from_millis(member.tick_ms).mul_f64(count)).await;
+}
+
 fn sync_request(session_id: &str, next_tick: u64) -> Sync {
     Sync {
         session_id: session_id.to_owned(),
@@ -164,11 +175,31 @@ async fn post_sync(server: &TestServer, body: &Sync) -> Reply {
     server.post("/v3/room/sync", body).send().await
 }
 
+/// 待っている状態になるまで読み進める。
+///
+/// 預け入れが同じ応答で返るとは限らない。既に締め切り済みのレコードがあれば、
+/// サーバーはそれを待たずに返す。経路が遅ければ預け入れは次の窓へ回る。
+async fn read_until(
+    server: &TestServer,
+    member: &Member,
+    first: Synced,
+    found: impl Fn(&Synced) -> bool,
+) -> Synced {
+    let mut synced = first;
+    for _ in 0..8 {
+        if found(&synced) {
+            return synced;
+        }
+        synced = post_sync(server, &sync_request(&member.session_id, synced.next_tick))
+            .await
+            .expect_ok();
+    }
+    panic!("待っていた内容が届きませんでした");
+}
+
 #[tokio::test]
 async fn syncs_with_a_single_user() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let reply = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
@@ -189,14 +220,13 @@ async fn syncs_with_a_single_user() {
 
 #[tokio::test]
 async fn actions_are_echoed_to_the_sender() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
     body.actions = vec![event("attack", "えい")];
-    let synced: Synced = post_sync(&server, &body).await.msgpack();
+    let first: Synced = post_sync(&server, &body).await.expect_ok();
+    let synced = read_until(&server, &alice, first, |s| !s.actions.is_empty()).await;
 
     assert_eq!(synced.actions.len(), 1, "送信者にも返る");
     assert_eq!(synced.actions[0].kind, "attack");
@@ -209,9 +239,7 @@ async fn actions_are_echoed_to_the_sender() {
 
 #[tokio::test]
 async fn reports_are_not_echoed_to_the_sender() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -223,24 +251,22 @@ async fn reports_are_not_echoed_to_the_sender() {
 
 #[tokio::test]
 async fn reports_reach_the_other_users() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
     let bob = join_room(&server, &alice.code(), "Bob").await;
 
-    let mut body = sync_request(&bob.session_id, 0);
-    body.reports = vec![event("position", "3,4")];
-    let bob_reply = tokio::spawn({
-        let server = server.clone();
-        async move { post_sync(&server, &body).await }
-    });
-    // Bob の預け入れが先に届くようにする。同じレコードに入れば全員到着で締め切られる。
-    tokio::time::sleep(Duration::from_millis(10)).await;
-    let alice_synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
-        .await
-        .msgpack();
-    bob_reply.await.expect("Bob の同期が終わりません");
+    let mut from_bob = sync_request(&bob.session_id, 0);
+    from_bob.reports = vec![event("position", "3,4")];
+    // 締め切りは期限であって全員の到着ではないので、同時に送っても順序は問わない。
+    let from_alice = sync_request(&alice.session_id, 0);
+    let (alice_reply, _) = tokio::join!(
+        post_sync(&server, &from_alice),
+        post_sync(&server, &from_bob),
+    );
+    let alice_synced = read_until(&server, &alice, alice_reply.expect_ok(), |s| {
+        !s.reports.is_empty()
+    })
+    .await;
 
     assert_eq!(alice_synced.reports.len(), 1);
     assert_eq!(alice_synced.reports[0].from, bob.user_id);
@@ -249,7 +275,8 @@ async fn reports_reach_the_other_users() {
 
 #[tokio::test]
 async fn rejects_a_double_sync() {
-    // 窓を長く取り、1 本目が確実に届いてから 2 本目を送る。
+    // 2 本を同じ窓へ確実に入れるには窓を長く取るしかない。既定の 100 ms では、
+    // 経路の揺らぎで 2 本目が次の窓へずれ込みうる。
     let Some(server) = TestServer::with_config(Config {
         tick: Duration::from_millis(500),
         ..config()
@@ -261,18 +288,19 @@ async fn rejects_a_double_sync() {
     let alice = create_room(&server, 2).await;
     join_room(&server, &alice.code(), "Bob").await;
 
-    // 相手が来ないので締め切りまで待つ。その間にもう一度送る。
-    let first = tokio::spawn({
-        let server = server.clone();
-        let body = sync_request(&alice.session_id, 0);
-        async move { post_sync(&server, &body).await }
-    });
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let second = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
-    first.await.expect("最初の同期が終わりません");
+    // どちらが先に届くかは決められないので、順序ではなく結果の組み合わせを見る。
+    let body = sync_request(&alice.session_id, 0);
+    let (first, second) = tokio::join!(post_sync(&server, &body), post_sync(&server, &body),);
 
-    assert_eq!(second.status, StatusCode::FORBIDDEN);
-    assert_eq!(second.error_code(), "already_synced");
+    let mut statuses = [first.status, second.status];
+    statuses.sort_unstable();
+    assert_eq!(statuses, [StatusCode::OK, StatusCode::FORBIDDEN]);
+    let rejected = if first.status == StatusCode::FORBIDDEN {
+        &first
+    } else {
+        &second
+    };
+    assert_eq!(rejected.error_code(), "already_synced");
 }
 
 #[tokio::test]
@@ -302,9 +330,7 @@ async fn rejects_a_cursor_that_is_too_old() {
 
 #[tokio::test]
 async fn rejects_a_cursor_in_the_future() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let reply = post_sync(&server, &sync_request(&alice.session_id, 9999)).await;
@@ -315,9 +341,7 @@ async fn rejects_a_cursor_in_the_future() {
 
 #[tokio::test]
 async fn rejects_an_invalid_session() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     create_room(&server, 2).await;
 
     let reply = post_sync(&server, &sync_request(&Uuid::new_v4().to_string(), 0)).await;
@@ -328,9 +352,7 @@ async fn rejects_an_invalid_session() {
 
 #[tokio::test]
 async fn rejects_too_many_events() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -343,9 +365,7 @@ async fn rejects_too_many_events() {
 
 #[tokio::test]
 async fn the_start_appears_in_the_response() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     server
@@ -366,11 +386,9 @@ async fn the_start_appears_in_the_response() {
 
 #[tokio::test]
 async fn returns_several_records_at_once() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
-    tokio::time::sleep(Duration::from_millis(170)).await;
+    wait_ticks(&alice, 3.4).await;
 
     let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
         .await
@@ -383,13 +401,12 @@ async fn returns_several_records_at_once() {
     );
 }
 
-async fn send_room_info(server: &TestServer, session_id: &str, info: &str) {
-    let mut body = sync_request(session_id, 0);
+async fn send_room_info(server: &TestServer, member: &Member, info: &str) {
+    let mut body = sync_request(&member.session_id, 0);
     body.room_info = Some(info.to_owned());
-    let server = server.clone();
-    tokio::spawn(async move { post_sync(&server, &body).await });
+    post_sync(server, &body).await;
     // 締め切りを跨がせる。反映はレコードの締め切り時である。
-    tokio::time::sleep(Duration::from_millis(120)).await;
+    wait_ticks(member, 1.5).await;
 }
 
 async fn read_room_info(server: &TestServer, code: &str, name: &str) -> Option<String> {
@@ -413,12 +430,10 @@ async fn read_room_info(server: &TestServer, code: &str, name: &str) -> Option<S
 
 #[tokio::test]
 async fn the_owner_can_update_room_info() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 4).await;
 
-    send_room_info(&server, &alice.session_id, "ステージ 2").await;
+    send_room_info(&server, &alice, "ステージ 2").await;
 
     assert_eq!(
         read_room_info(&server, &alice.code(), "Bob")
@@ -430,13 +445,11 @@ async fn the_owner_can_update_room_info() {
 
 #[tokio::test]
 async fn ignores_room_info_from_others() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 4).await;
     let bob = join_room(&server, &alice.code(), "Bob").await;
 
-    send_room_info(&server, &bob.session_id, "Bob の設定").await;
+    send_room_info(&server, &bob, "Bob の設定").await;
 
     assert_eq!(
         read_room_info(&server, &alice.code(), "Charlie").await,
@@ -458,9 +471,7 @@ impl Member {
 
 #[tokio::test]
 async fn the_last_record_carries_no_tick() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -476,9 +487,7 @@ async fn the_last_record_carries_no_tick() {
 
 #[tokio::test]
 async fn older_records_carry_a_tick() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let first_id = Uuid::now_v7().to_string();
@@ -522,9 +531,7 @@ fn sync_request_with_applied(session_id: &str, next_tick: u64, applied: u64) -> 
 
 #[tokio::test]
 async fn accepts_a_matching_applied_count() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut first = sync_request_with_applied(&alice.session_id, 0, 0);
@@ -546,9 +553,7 @@ async fn accepts_a_matching_applied_count() {
 
 #[tokio::test]
 async fn detects_a_mismatched_applied_count() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut first = sync_request_with_applied(&alice.session_id, 0, 0);
@@ -568,23 +573,17 @@ async fn detects_a_mismatched_applied_count() {
 
 #[tokio::test]
 async fn reports_desync_to_everyone() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
     let bob = join_room(&server, &alice.code(), "Bob").await;
 
-    let bob_reply = tokio::spawn({
-        let server = server.clone();
-        let body = sync_request_with_applied(&bob.session_id, 0, 42);
-        async move { post_sync(&server, &body).await }
-    });
-    tokio::time::sleep(Duration::from_millis(10)).await;
-    let alice_synced: Synced =
-        post_sync(&server, &sync_request_with_applied(&alice.session_id, 0, 0))
-            .await
-            .msgpack();
-    bob_reply.await.expect("Bob の同期が終わりません");
+    let from_alice = sync_request_with_applied(&alice.session_id, 0, 0);
+    let from_bob = sync_request_with_applied(&bob.session_id, 0, 42);
+    let (alice_reply, _) = tokio::join!(
+        post_sync(&server, &from_alice),
+        post_sync(&server, &from_bob),
+    );
+    let alice_synced = read_until(&server, &alice, alice_reply.expect_ok(), |s| s.desync).await;
 
     assert!(
         alice_synced.desync,
@@ -594,9 +593,7 @@ async fn reports_desync_to_everyone() {
 
 #[tokio::test]
 async fn rejects_a_body_without_applied() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let reply = server
@@ -647,9 +644,7 @@ async fn drops_users_that_stop_responding() {
 
 #[tokio::test]
 async fn marks_late_users_as_absent() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
     join_room(&server, &alice.code(), "Bob").await;
 
@@ -679,9 +674,7 @@ const ROOM_INFO_LIMIT: usize = 64 * 1024 - 3;
 
 #[tokio::test]
 async fn accepts_data_at_the_limit() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -696,9 +689,7 @@ async fn accepts_data_at_the_limit() {
 
 #[tokio::test]
 async fn rejects_data_one_byte_over_the_limit() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -715,9 +706,7 @@ async fn rejects_data_one_byte_over_the_limit() {
 
 #[tokio::test]
 async fn accepts_room_info_at_the_limit() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -728,9 +717,7 @@ async fn accepts_room_info_at_the_limit() {
 
 #[tokio::test]
 async fn rejects_room_info_one_byte_over_the_limit() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -743,9 +730,7 @@ async fn rejects_room_info_one_byte_over_the_limit() {
 
 #[tokio::test]
 async fn accepts_the_maximum_number_of_events() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -757,9 +742,7 @@ async fn accepts_the_maximum_number_of_events() {
 
 #[tokio::test]
 async fn rejects_too_many_reports() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -772,9 +755,7 @@ async fn rejects_too_many_reports() {
 
 #[tokio::test]
 async fn rejects_an_oversized_body() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -823,9 +804,7 @@ async fn removes_an_abandoned_room_without_any_sync() {
 
 #[tokio::test]
 async fn resending_does_not_duplicate_an_event() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let id = Uuid::now_v7().to_string();
@@ -836,26 +815,12 @@ async fn resending_does_not_duplicate_an_event() {
         data: "A".to_owned(),
     }];
 
-    // 応答を受け取れなかったクライアントを模す。預け入れは済んでいる。
-    let lost = tokio::spawn({
-        let server = server.clone();
-        let body = sync_request(&alice.session_id, 0);
-        let mut body = body;
-        body.actions = vec![OutEvent {
-            id: id.clone(),
-            kind: "attack".to_owned(),
-            data: "A".to_owned(),
-        }];
-        async move { post_sync(&server, &body).await }
-    });
-    tokio::time::sleep(Duration::from_millis(10)).await;
-    lost.abort();
-
-    // 窓が締まるのを待ってから、同じ本文で再送する。
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    // 応答を受け取れなかったクライアントを模す。預け入れそのものは済んでいるため、
+    // 同じ ID で送り直しても二度は配られない。
     post_sync(&server, &body).await;
-
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    wait_ticks(&alice, 1.5).await;
+    post_sync(&server, &body).await;
+    wait_ticks(&alice, 1.5).await;
     let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
         .await
         .msgpack();
@@ -866,9 +831,7 @@ async fn resending_does_not_duplicate_an_event() {
 
 #[tokio::test]
 async fn events_from_one_sender_keep_their_order() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -884,9 +847,7 @@ async fn events_from_one_sender_keep_their_order() {
 
 #[tokio::test]
 async fn room_users_are_sorted_by_id_with_the_owner_first() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     let alice = create_room(&server, 4).await;
     join_room(&server, &alice.code(), "Bob").await;
     join_room(&server, &alice.code(), "Charlie").await;
@@ -908,9 +869,7 @@ async fn room_users_are_sorted_by_id_with_the_owner_first() {
 
 #[tokio::test]
 async fn a_response_does_not_arrive_before_the_deadline() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
+    let server = TestServer::start().await;
     // 部屋の人数ぶん全員が預けても、窓の終わりまで締め切ってはならない。
     let alice = create_room(&server, 2).await;
     let bob = join_room(&server, &alice.code(), "Bob").await;
@@ -929,7 +888,7 @@ async fn a_response_does_not_arrive_before_the_deadline() {
     assert_eq!(both.0.status, StatusCode::OK);
     assert_eq!(both.1.status, StatusCode::OK);
     assert!(
-        elapsed >= config().tick / 2,
+        elapsed >= Duration::from_millis(alice.tick_ms) / 2,
         "全員到着で早く締め切っています: {elapsed:?}"
     );
 }

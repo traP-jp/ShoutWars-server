@@ -5,8 +5,8 @@
 //!
 //! 環境変数 `TEST_SERVER_URL` (例: `https://example.com`) を設定すると、
 //! ローカルで起動する代わりにそのサーバーへ同じテストを流す。バージョンのパス (`/v3`) は含めない。
-//! 設定に依存するテストは、
-//! こちらの設定を制御できないため [`TestServer::with_config`] が `None` を返して省略される。
+//! サーバーの設定を要するテストは、こちらから設定を決められないため
+//! [`TestServer::with_config`] が `None` を返して省略され、省略した旨が端末へ出る。
 //! そのサーバーがパスワードを要求する場合は `TEST_SERVER_PASSWORD` に指定する。
 
 // 統合テストは 1 ファイルにつき 1 クレートとしてビルドされるため、
@@ -16,13 +16,14 @@
 
 use std::{
     env,
+    io::Write as _,
     net::{Ipv4Addr, SocketAddr},
 };
 
 use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use shoutwars_server::config::Config;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::OnceCell};
 
 #[derive(Debug, Clone)]
 pub struct TestServer {
@@ -39,11 +40,25 @@ fn external_server() -> Option<String> {
         .map(|url| url.trim_end_matches('/').to_owned())
 }
 
+/// 省略したことを端末へ知らせる。
+///
+/// 省略したテストは「ok」と表示されるため、何も言わないと空振りに気づけない。
+/// `println!` 系はテストハーネスに捕まって握り潰されるので、`stderr` へ直に書く。
+/// スレッド名はハーネスがテスト名を入れている。
+fn note_skipped() {
+    let name = std::thread::current().name().unwrap_or("?").to_owned();
+    let _ = writeln!(std::io::stderr(), "省略 (外部サーバー): {name}");
+}
+
 impl TestServer {
     /// サーバーの設定に依存しないテスト用。外部サーバーが指定されていればそこへ向ける。
     pub async fn start() -> Self {
         match external_server() {
-            Some(base_url) => Self::at(base_url),
+            Some(base_url) => {
+                let server = Self::at(base_url);
+                server.warm_up().await;
+                server
+            }
             None => Self::spawn(&Config::default()).await,
         }
     }
@@ -54,6 +69,7 @@ impl TestServer {
     /// 呼び出し側は `let Some(server) = ... else { return }` で省略する。
     pub async fn with_config(config: Config) -> Option<Self> {
         if external_server().is_some() {
+            note_skipped();
             return None;
         }
         Some(Self::spawn(&config).await)
@@ -82,6 +98,24 @@ impl TestServer {
             http: reqwest::Client::new(),
             password: None,
         }
+    }
+
+    /// 眠っている外部サーバーを起こす。
+    ///
+    /// NeoShowcase は無アクセスのアプリを停止させる。起床までの間、リクエストには
+    /// リダイレクトや MessagePack でない応答が返る。最初の 1 本でそれを吸収し、
+    /// 個々のテストが起床待ちに巻き込まれないようにする。
+    async fn warm_up(&self) {
+        static WARMED: OnceCell<()> = OnceCell::const_new();
+        WARMED
+            .get_or_init(|| async {
+                let _ = self
+                    .http
+                    .get(format!("{}/v3/status", self.base_url))
+                    .send()
+                    .await;
+            })
+            .await;
     }
 
     fn at(base_url: String) -> Self {
