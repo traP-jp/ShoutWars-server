@@ -18,7 +18,7 @@ struct Create {
 #[derive(Debug, Serialize)]
 struct Join {
     version: String,
-    name: String,
+    code: String,
     user: UserName,
 }
 
@@ -29,7 +29,7 @@ struct UserName {
 
 #[derive(Debug, Deserialize)]
 struct Created {
-    name: String,
+    code: String,
     user_id: String,
 }
 
@@ -52,10 +52,10 @@ fn create_request(size: usize) -> Create {
     }
 }
 
-fn join_request(number: &str, version: &str) -> Join {
+fn join_request(code: &str, version: &str) -> Join {
     Join {
         version: version.to_owned(),
-        name: number.to_owned(),
+        code: code.to_owned(),
         user: UserName {
             name: "Bob".to_owned(),
         },
@@ -76,7 +76,7 @@ async fn joins_a_room() {
     let created = prepare_room(&server, 2).await;
 
     let reply = server
-        .post("/v3/room/join", &join_request(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.code, "1.0"))
         .send()
         .await;
 
@@ -93,7 +93,7 @@ async fn joiner_id_is_greater_than_the_owner() {
     let created = prepare_room(&server, 2).await;
 
     let joined: Joined = server
-        .post("/v3/room/join", &join_request(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.code, "1.0"))
         .send()
         .await
         .msgpack();
@@ -124,14 +124,14 @@ async fn cannot_join_a_missing_room() {
 async fn rejects_a_malformed_room_number() {
     let server = TestServer::start().await;
 
-    for number in ["12345", "1234567", "12345a", "あいうえお"] {
+    for code in ["12345", "1234567", "12345a", "あいうえお"] {
         let reply = server
-            .post("/v3/room/join", &join_request(number, "1.0"))
+            .post("/v3/room/join", &join_request(code, "1.0"))
             .send()
             .await;
 
-        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "number={number}");
-        assert_eq!(reply.error_code(), "bad_request", "number={number}");
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "code={code}");
+        assert_eq!(reply.error_code(), "bad_request", "code={code}");
     }
 }
 
@@ -141,7 +141,7 @@ async fn rejects_a_version_mismatch() {
     let created = prepare_room(&server, 2).await;
 
     let reply = server
-        .post("/v3/room/join", &join_request(&created.name, "1.1"))
+        .post("/v3/room/join", &join_request(&created.code, "1.1"))
         .send()
         .await;
 
@@ -155,13 +155,13 @@ async fn rejects_a_full_room() {
     let created = prepare_room(&server, 2).await;
 
     let reply = server
-        .post("/v3/room/join", &join_request(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.code, "1.0"))
         .send()
         .await;
     assert_eq!(reply.status, StatusCode::OK, "2 人目は入れる");
 
     let reply = server
-        .post("/v3/room/join", &join_request(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.code, "1.0"))
         .send()
         .await;
 
@@ -183,7 +183,7 @@ async fn cannot_join_an_expired_room() {
     tokio::time::sleep(std::time::Duration::from_millis(80)).await;
 
     let reply = server
-        .post("/v3/room/join", &join_request(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.code, "1.0"))
         .send()
         .await;
 
@@ -205,7 +205,7 @@ async fn cursor_starts_at_the_current_window() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let joined: Joined = server
-        .post("/v3/room/join", &join_request(&created.name, "1.0"))
+        .post("/v3/room/join", &join_request(&created.code, "1.0"))
         .send()
         .await
         .msgpack();

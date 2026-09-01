@@ -26,7 +26,7 @@ struct Created {
     session_id: String,
     user_id: String,
     id: String,
-    name: String,
+    code: String,
     next_tick: u64,
     tick_ms: u64,
 }
@@ -76,15 +76,15 @@ async fn room_number_is_six_digits() {
         .msgpack();
 
     assert_eq!(
-        created.name.len(),
+        created.code.len(),
         6,
         "6 桁ではありません: {}",
-        created.name
+        created.code
     );
     assert!(
-        created.name.bytes().all(|b| b.is_ascii_digit()),
+        created.code.bytes().all(|b| b.is_ascii_digit()),
         "数字以外を含みます: {}",
-        created.name
+        created.code
     );
 }
 
@@ -99,13 +99,13 @@ async fn room_numbers_do_not_collide() {
             .send()
             .await
             .msgpack();
-        numbers.push(created.name);
+        numbers.push(created.code);
     }
 
     numbers.sort_unstable();
     let before = numbers.len();
     numbers.dedup();
-    assert_eq!(numbers.len(), before, "部屋番号が重複しました");
+    assert_eq!(numbers.len(), before, "参加コードが重複しました");
 }
 
 #[tokio::test]

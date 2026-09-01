@@ -36,7 +36,7 @@ pub struct Inner {
     sessions: HashMap<Uuid, Session>,
 }
 
-/// 部屋番号の引き直しの上限。無いと、番号が埋まってきたときに際限なく回る。
+/// 参加コードの引き直しの上限。無いと、コードが埋まってきたときに際限なく回る。
 const NUMBERING_ATTEMPTS: usize = 32;
 
 impl Inner {
@@ -256,7 +256,7 @@ impl Inner {
         self.by_number.get(&session.room).ok_or(Error::RoomNotFound)
     }
 
-    /// 空いている部屋番号を引く。使用中なら引き直す。
+    /// 空いている参加コードを引く。使用中なら引き直す。
     ///
     /// 順番に採番する方式へ変えてはならない。連番だと直前に消えた番号がすぐ次の部屋へ渡り、
     /// 古い番号を握ったままのクライアントが他人の部屋へ入る。防ぐには再利用の猶予が要る。

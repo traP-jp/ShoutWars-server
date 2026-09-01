@@ -48,7 +48,7 @@ struct Create {
 #[derive(Debug, Serialize)]
 struct Join {
     version: String,
-    name: String,
+    code: String,
     user: UserName,
 }
 
@@ -75,12 +75,37 @@ struct OutEvent {
 }
 
 #[derive(Debug, Deserialize)]
+struct Created {
+    code: String,
+    session_id: String,
+    user_id: String,
+    next_tick: u64,
+}
+
+#[derive(Debug, Deserialize)]
 struct Joined {
     session_id: String,
     user_id: String,
-    #[serde(default)]
-    name: String,
     next_tick: u64,
+}
+
+/// 参加者。表示名は応答に含まれないので、テスト側で覚えておく。
+struct Player {
+    name: String,
+    session_id: String,
+    user_id: String,
+    next_tick: u64,
+}
+
+impl Player {
+    fn new(name: &str, joined: Joined) -> Self {
+        Self {
+            name: name.to_owned(),
+            session_id: joined.session_id,
+            user_id: joined.user_id,
+            next_tick: joined.next_tick,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,7 +152,7 @@ struct Played {
 }
 
 /// 1 人を最後まで走らせ、応答ごとに不変条件を確かめる。
-async fn play(server: TestServer, player: usize, member: Joined) -> Played {
+async fn play(server: TestServer, player: usize, member: Player) -> Played {
     let mut cursor = member.next_tick;
     let mut applied = 0_u64;
     let mut result = Played {
@@ -232,7 +257,7 @@ async fn three_players_stay_in_sync() {
         return;
     };
 
-    let owner: Joined = server
+    let owner: Created = server
         .post(
             "/v3/room/create",
             &Create {
@@ -246,19 +271,22 @@ async fn three_players_stay_in_sync() {
         .send()
         .await
         .msgpack();
-    // create の応答の `name` は部屋番号。参加者名で上書きする前に控える。
-    let room_number = owner.name.clone();
-    let mut members = vec![Joined {
-        name: NAMES[0].to_owned(),
-        ..owner
-    }];
+    let room_number = owner.code.clone();
+    let mut members = vec![Player::new(
+        NAMES[0],
+        Joined {
+            session_id: owner.session_id,
+            user_id: owner.user_id,
+            next_tick: owner.next_tick,
+        },
+    )];
     for name in &NAMES[1..] {
         let joined: Joined = server
             .post(
                 "/v3/room/join",
                 &Join {
                     version: "1.0".to_owned(),
-                    name: room_number.clone(),
+                    code: room_number.clone(),
                     user: UserName {
                         name: (*name).to_owned(),
                     },
@@ -267,10 +295,7 @@ async fn three_players_stay_in_sync() {
             .send()
             .await
             .msgpack();
-        members.push(Joined {
-            name: (*name).to_owned(),
-            ..joined
-        });
+        members.push(Player::new(name, joined));
     }
     let played = {
         let mut tasks = Vec::new();

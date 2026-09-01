@@ -18,7 +18,7 @@ use crate::{
     record::{Event, Record, UserSnapshot, merge},
 };
 
-/// 部屋番号。口頭で伝えられるよう、部屋 ID とは別に持つ 6 桁の数字。
+/// 参加コード。口頭で伝えられるよう、部屋 ID とは別に持つ 6 桁の数字。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RoomNumber(u32);
 
@@ -43,7 +43,7 @@ impl fmt::Display for RoomNumber {
     }
 }
 
-/// 部屋番号として読めなかったことを表す。
+/// 参加コードとして読めなかったことを表す。
 ///
 /// `Error` と分けてあるのは、serde が要求する `Display` を満たすため。
 /// `Error` は HTTP の応答を組み立てる型であり、文字列にする意味を持たない。
@@ -52,7 +52,7 @@ pub struct InvalidRoomNumber;
 
 impl fmt::Display for InvalidRoomNumber {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "部屋番号は {} 桁の数字です。", RoomNumber::DIGITS)
+        write!(f, "参加コードは {} 桁の数字です。", RoomNumber::DIGITS)
     }
 }
 

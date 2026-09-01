@@ -28,7 +28,7 @@ pub struct Response {
     session_id: Uuid,
     user_id: Uuid,
     id: Uuid,
-    name: RoomNumber,
+    code: RoomNumber,
     /// 最初の同期で申告するカーソル。作成直後なので 0 から始まる。
     next_tick: u64,
     tick_ms: u64,
@@ -47,7 +47,7 @@ pub async fn create(
         session_id,
         user_id,
         id: room.id,
-        name: room.number,
+        code: room.number,
         next_tick: 0,
         tick_ms: state.config.tick_ms(),
     }))

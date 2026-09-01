@@ -17,7 +17,7 @@ struct Create {
 #[derive(Debug, Serialize)]
 struct Join {
     version: String,
-    name: String,
+    code: String,
     user: UserName,
 }
 
@@ -33,7 +33,7 @@ struct Start {
 
 #[derive(Debug, Deserialize)]
 struct Created {
-    name: String,
+    code: String,
     session_id: String,
 }
 
@@ -59,13 +59,13 @@ async fn prepare_room(server: &TestServer) -> Created {
         .msgpack()
 }
 
-async fn join_room(server: &TestServer, number: &str) -> Joined {
+async fn join_room(server: &TestServer, code: &str) -> Joined {
     server
         .post(
             "/v3/room/join",
             &Join {
                 version: "1.0".to_owned(),
-                name: number.to_owned(),
+                code: code.to_owned(),
                 user: UserName {
                     name: "Bob".to_owned(),
                 },
@@ -99,7 +99,7 @@ async fn the_owner_can_start() {
 async fn others_cannot_start() {
     let server = TestServer::start().await;
     let created = prepare_room(&server).await;
-    let joined = join_room(&server, &created.name).await;
+    let joined = join_room(&server, &created.code).await;
 
     let reply = server
         .post("/v3/room/start", &start_request(&joined.session_id))
@@ -160,7 +160,7 @@ async fn cannot_join_after_the_start() {
             "/v3/room/join",
             &Join {
                 version: "1.0".to_owned(),
-                name: created.name.clone(),
+                code: created.code.clone(),
                 user: UserName {
                     name: "Bob".to_owned(),
                 },

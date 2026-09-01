@@ -10,7 +10,7 @@ use crate::{AppState, error::Result, msgpack::MsgPack, room::RoomNumber};
 #[derive(Debug, Deserialize)]
 pub struct Request {
     version: String,
-    name: RoomNumber,
+    code: RoomNumber,
     user: UserName,
 }
 
@@ -35,7 +35,7 @@ pub async fn join(
     MsgPack(request): MsgPack<Request>,
 ) -> Result<MsgPack<Response>> {
     let mut rooms = state.rooms.lock();
-    let joined = rooms.join(request.name, &request.version, request.user.name)?;
+    let joined = rooms.join(request.code, &request.version, request.user.name)?;
     Ok(MsgPack(Response {
         session_id: joined.session_id,
         user_id: joined.user_id,

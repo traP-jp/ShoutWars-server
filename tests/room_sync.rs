@@ -29,7 +29,7 @@ struct Create {
 #[derive(Debug, Serialize)]
 struct Join {
     version: String,
-    name: String,
+    code: String,
     user: UserName,
 }
 
@@ -79,7 +79,7 @@ struct Member {
     session_id: String,
     user_id: String,
     #[serde(default)]
-    name: String,
+    code: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,13 +135,13 @@ async fn create_room(server: &TestServer, size: usize) -> Member {
         .msgpack()
 }
 
-async fn join_room(server: &TestServer, number: &str, name: &str) -> Member {
+async fn join_room(server: &TestServer, code: &str, name: &str) -> Member {
     server
         .post(
             "/v3/room/join",
             &Join {
                 version: "1.0".to_owned(),
-                name: number.to_owned(),
+                code: code.to_owned(),
                 user: UserName {
                     name: name.to_owned(),
                 },
@@ -227,7 +227,7 @@ async fn reports_reach_the_other_users() {
         return;
     };
     let alice = create_room(&server, 2).await;
-    let bob = join_room(&server, &alice.name(), "Bob").await;
+    let bob = join_room(&server, &alice.code(), "Bob").await;
 
     let mut body = sync_request(&bob.session_id, 0);
     body.reports = vec![event("position", "3,4")];
@@ -259,7 +259,7 @@ async fn rejects_a_double_sync() {
         return;
     };
     let alice = create_room(&server, 2).await;
-    join_room(&server, &alice.name(), "Bob").await;
+    join_room(&server, &alice.code(), "Bob").await;
 
     // 相手が来ないので締め切りまで待つ。その間にもう一度post_sync。
     let first = tokio::spawn({
@@ -392,13 +392,13 @@ async fn send_room_info(server: &TestServer, session_id: &str, info: &str) {
     tokio::time::sleep(Duration::from_millis(120)).await;
 }
 
-async fn read_room_info(server: &TestServer, number: &str, name: &str) -> Option<String> {
+async fn read_room_info(server: &TestServer, code: &str, name: &str) -> Option<String> {
     let joined: RoomInfoOnly = server
         .post(
             "/v3/room/join",
             &Join {
                 version: "1.0".to_owned(),
-                name: number.to_owned(),
+                code: code.to_owned(),
                 user: UserName {
                     name: name.to_owned(),
                 },
@@ -420,7 +420,7 @@ async fn the_owner_can_update_room_info() {
     send_room_info(&server, &alice.session_id, "ステージ 2").await;
 
     assert_eq!(
-        read_room_info(&server, &alice.name(), "Bob")
+        read_room_info(&server, &alice.code(), "Bob")
             .await
             .as_deref(),
         Some("ステージ 2")
@@ -433,12 +433,12 @@ async fn ignores_room_info_from_others() {
         return;
     };
     let alice = create_room(&server, 4).await;
-    let bob = join_room(&server, &alice.name(), "Bob").await;
+    let bob = join_room(&server, &alice.code(), "Bob").await;
 
     send_room_info(&server, &bob.session_id, "Bob のconfig").await;
 
     assert_eq!(
-        read_room_info(&server, &alice.name(), "Charlie").await,
+        read_room_info(&server, &alice.code(), "Charlie").await,
         None,
         "部屋主以外の更新が通りました"
     );
@@ -450,8 +450,8 @@ struct RoomInfoOnly {
 }
 
 impl Member {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn code(&self) -> String {
+        self.code.clone()
     }
 }
 
@@ -574,7 +574,7 @@ async fn reports_desync_to_everyone() {
         return;
     };
     let alice = create_room(&server, 2).await;
-    let bob = join_room(&server, &alice.name(), "Bob").await;
+    let bob = join_room(&server, &alice.code(), "Bob").await;
 
     let bob_reply = tokio::spawn({
         let server = server.clone();
@@ -622,7 +622,7 @@ async fn drops_users_that_stop_responding() {
         return;
     };
     let alice = create_room(&server, 2).await;
-    let bob = join_room(&server, &alice.name(), "Bob").await;
+    let bob = join_room(&server, &alice.code(), "Bob").await;
 
     // Bob は一度もsync_requestしない。保持数を超えて応答が無ければ部屋から外れる。
     let mut users = Vec::new();
@@ -653,7 +653,7 @@ async fn marks_late_users_as_absent() {
         return;
     };
     let alice = create_room(&server, 2).await;
-    join_room(&server, &alice.name(), "Bob").await;
+    join_room(&server, &alice.code(), "Bob").await;
 
     // Bob が来ないので、最初のレコードは期限で締め切られる。
     let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
