@@ -71,12 +71,12 @@ impl Inner {
             return Err(Error::RoomLimitReached);
         }
         let number = self.take_number()?;
-        let session = Session {
-            room: number,
-            user: owner.id,
-        };
-        self.sessions.insert(owner.session_id, session);
+        let (session_id, user) = (owner.session_id, owner.id);
+        // 失敗し得る処理をすべて終えてからセッションを登録する。
+        // 先に登録すると、部屋の作成に失敗したときに指す先の無いセッションが残る。
         let room = Room::new(number, version, owner, size)?;
+        self.sessions
+            .insert(session_id, Session { room: number, user });
         tracing::info!(id = %room.id, %number, size, "部屋を作成しました");
         Ok(self.by_number.entry(number).or_insert(room))
     }
@@ -325,5 +325,27 @@ impl RoomList {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 部屋の作成に失敗したとき、セッションが残らないこと。
+    ///
+    /// 残ると、指す先の無いセッションが掃除の対象にならず永久に溜まる。
+    /// 人数が範囲外の `create` を繰り返すだけでメモリを枯渇させられる。
+    #[test]
+    fn a_failed_create_leaves_no_session() {
+        let rooms = RoomList::new(Arc::new(Config::default()));
+        let mut inner = rooms.lock();
+
+        let owner = User::new("Alice".to_owned()).expect("名前は正しい");
+        let result = inner.create("1.0".to_owned(), owner, 99);
+
+        assert!(result.is_err(), "人数 99 は拒まれる");
+        assert!(inner.sessions.is_empty(), "セッションが残っています");
+        assert!(inner.by_number.is_empty(), "部屋が残っています");
     }
 }
