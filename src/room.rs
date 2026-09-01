@@ -1,7 +1,7 @@
 //! 部屋とユーザー。
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     str::FromStr,
     time::{Duration, Instant},
@@ -142,6 +142,12 @@ pub struct Room {
     pending: HashMap<Uuid, Pending>,
     /// 締め切り済みのレコード。古いものから捨てる。
     closed: VecDeque<Record>,
+    /// 保持しているレコードと、開いている窓にあるイベントの ID。
+    ///
+    /// 応答を取り損ねたクライアントは、確認できていないイベントを次の送信でもう一度
+    /// 送る。同じものを二度配ると、クライアントは二重に適用してしまう。しかも配信数は
+    /// 双方で一致するため、desync の照合では検出できない。
+    seen_events: HashSet<Uuid>,
     /// 保持期間から落ちたレコードまでの累計配信数。
     delivered_before: HashMap<Uuid, u64>,
     /// 食い違いを検出したか。一度立てば全員に通知し続ける。
@@ -187,6 +193,7 @@ impl Room {
             open_tick: 0,
             pending: HashMap::new(),
             closed: VecDeque::new(),
+            seen_events: HashSet::new(),
             delivered_before: HashMap::new(),
             desync: false,
         })
@@ -317,6 +324,9 @@ impl Room {
     pub fn trim(&mut self, retention: usize) {
         while self.closed.len() > retention {
             if let Some(dropped) = self.closed.pop_front() {
+                for event in dropped.reports.iter().chain(&dropped.actions) {
+                    self.seen_events.remove(&event.id);
+                }
                 self.delivered_before = dropped.delivered;
             }
         }
@@ -342,6 +352,8 @@ impl Room {
     /// サーバーがそれを解釈することになり、中身を解釈しない前提が崩れる。
     /// 合流はクライアントが送信前に行う。
     pub fn deposit(&mut self, from: Uuid, reports: Vec<Event>, actions: Vec<Event>) {
+        let reports = self.only_new(reports);
+        let actions = self.only_new(actions);
         let pending = self.pending.entry(from).or_default();
         pending.reports.extend(reports);
         pending.actions.extend(actions);
@@ -368,6 +380,14 @@ impl Room {
             false
         });
         dropped
+    }
+
+    /// まだ受け取っていない ID のイベントだけを残す。
+    fn only_new(&mut self, events: Vec<Event>) -> Vec<Event> {
+        events
+            .into_iter()
+            .filter(|event| self.seen_events.insert(event.id))
+            .collect()
     }
 
     pub fn has_deposited(&self, user: Uuid) -> bool {

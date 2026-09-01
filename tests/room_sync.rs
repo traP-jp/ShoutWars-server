@@ -764,3 +764,45 @@ async fn removes_a_room_once_everyone_is_gone() {
     let status: Status = server.get("/v3/status").send().await.msgpack();
     assert_eq!(status.room_count, 0, "誰もいない部屋が残っています");
 }
+#[tokio::test]
+async fn resending_does_not_duplicate_an_event() {
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+
+    let id = Uuid::now_v7().to_string();
+    let mut body = sync_request(&alice.session_id, 0);
+    body.actions = vec![OutEvent {
+        id: id.clone(),
+        kind: "attack".to_owned(),
+        data: "A".to_owned(),
+    }];
+
+    // 応答を受け取れなかったクライアントを模す。預け入れは済んでいる。
+    let lost = tokio::spawn({
+        let server = server.clone();
+        let body = sync_request(&alice.session_id, 0);
+        let mut body = body;
+        body.actions = vec![OutEvent {
+            id: id.clone(),
+            kind: "attack".to_owned(),
+            data: "A".to_owned(),
+        }];
+        async move { post_sync(&server, &body).await }
+    });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    lost.abort();
+
+    // 窓が締まるのを待ってから、同じ本文で再送する。
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    post_sync(&server, &body).await;
+
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
+        .await
+        .msgpack();
+
+    let count = synced.actions.iter().filter(|e| e.id == id).count();
+    assert_eq!(count, 1, "同じ event が {count} 回届きました");
+}
