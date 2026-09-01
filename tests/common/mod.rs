@@ -32,7 +32,7 @@ pub struct TestServer {
     password: Option<String>,
 }
 
-/// external_serverを向ける場合の宛先。
+/// 外部サーバーへ向ける場合の宛先。
 fn external_server() -> Option<String> {
     env::var("TEST_SERVER_URL")
         .ok()
@@ -40,7 +40,7 @@ fn external_server() -> Option<String> {
 }
 
 impl TestServer {
-    /// サーバーの設定に依存しないテスト用。external_serverが指定されていればそこへ向ける。
+    /// サーバーの設定に依存しないテスト用。外部サーバーが指定されていればそこへ向ける。
     pub async fn start() -> Self {
         match external_server() {
             Some(base_url) => Self::at(base_url),
@@ -50,7 +50,7 @@ impl TestServer {
 
     /// 設定に依存するテスト用。
     ///
-    /// external_serverの設定はこちらから決められないため、その場合は `None` を返す。
+    /// 外部サーバーの設定はこちらから決められないため、その場合は `None` を返す。
     /// 呼び出し側は `let Some(server) = ... else { return }` で省略する。
     pub async fn with_config(config: Config) -> Option<Self> {
         if external_server().is_some() {

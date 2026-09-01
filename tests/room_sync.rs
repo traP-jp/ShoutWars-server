@@ -181,7 +181,7 @@ async fn syncs_with_a_single_user() {
     assert_eq!(synced.room_users[0].name, "Alice");
     assert!(
         !synced.room_users[0].absent,
-        "sync_requestした本人が不在になっています"
+        "同期した本人が不在になっています"
     );
     assert!(!synced.started);
     assert!(!synced.desync);
@@ -240,7 +240,7 @@ async fn reports_reach_the_other_users() {
     let alice_synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
         .await
         .msgpack();
-    bob_reply.await.expect("Bob のsync_requestが終わりません");
+    bob_reply.await.expect("Bob の同期が終わりません");
 
     assert_eq!(alice_synced.reports.len(), 1);
     assert_eq!(alice_synced.reports[0].from, bob.user_id);
@@ -249,7 +249,7 @@ async fn reports_reach_the_other_users() {
 
 #[tokio::test]
 async fn rejects_a_double_sync() {
-    // 窓を長く取り、1 本目が確実に届いてから 2 本目をpost_sync。
+    // 窓を長く取り、1 本目が確実に届いてから 2 本目を送る。
     let Some(server) = TestServer::with_config(Config {
         tick: Duration::from_millis(500),
         ..config()
@@ -261,7 +261,7 @@ async fn rejects_a_double_sync() {
     let alice = create_room(&server, 2).await;
     join_room(&server, &alice.code(), "Bob").await;
 
-    // 相手が来ないので締め切りまで待つ。その間にもう一度post_sync。
+    // 相手が来ないので締め切りまで待つ。その間にもう一度送る。
     let first = tokio::spawn({
         let server = server.clone();
         let body = sync_request(&alice.session_id, 0);
@@ -269,7 +269,7 @@ async fn rejects_a_double_sync() {
     });
     tokio::time::sleep(Duration::from_millis(100)).await;
     let second = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
-    first.await.expect("最初のsync_requestが終わりません");
+    first.await.expect("最初の同期が終わりません");
 
     assert_eq!(second.status, StatusCode::FORBIDDEN);
     assert_eq!(second.error_code(), "already_synced");
@@ -282,8 +282,8 @@ async fn rejects_a_cursor_that_is_too_old() {
     };
     let alice = create_room(&server, 2).await;
 
-    // sync_requestは続けるがカーソルを進めないクライアント。応答はあるので脱落はしないが、
-    // 保持しているレコードから振り切られる。一人の部屋なので 1 回のsync_requestで 1 tick 進む。
+    // 同期は続けるがカーソルを進めないクライアント。応答はあるので脱落はしないが、
+    // 保持しているレコードから振り切られる。一人の部屋なので 1 回の同期で 1 tick 進む。
     let mut last = None;
     for _ in 0..8 {
         let reply = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
@@ -436,7 +436,7 @@ async fn ignores_room_info_from_others() {
     let alice = create_room(&server, 4).await;
     let bob = join_room(&server, &alice.code(), "Bob").await;
 
-    send_room_info(&server, &bob.session_id, "Bob のconfig").await;
+    send_room_info(&server, &bob.session_id, "Bob の設定").await;
 
     assert_eq!(
         read_room_info(&server, &alice.code(), "Charlie").await,
@@ -533,7 +533,7 @@ async fn accepts_a_matching_applied_count() {
     assert_eq!(first.actions.len(), 1);
     assert!(!first.desync);
 
-    // 1 件受け取ったので、次は applied = 1 をsync_request_with_appliedする。
+    // 1 件受け取ったので、次は applied = 1 を申告する。
     let second: Synced = post_sync(
         &server,
         &sync_request_with_applied(&alice.session_id, first.next_tick, 1),
@@ -541,10 +541,7 @@ async fn accepts_a_matching_applied_count() {
     .await
     .msgpack();
 
-    assert!(
-        !second.desync,
-        "正しいsync_request_with_appliedで desync と判定されました"
-    );
+    assert!(!second.desync, "正しい申告で desync と判定されました");
 }
 
 #[tokio::test]
@@ -558,7 +555,7 @@ async fn detects_a_mismatched_applied_count() {
     first.actions = vec![event("attack", "A")];
     let first: Synced = post_sync(&server, &first).await.msgpack();
 
-    // 1 件配られたのに 99 件処理したとsync_request_with_appliedする。
+    // 1 件配られたのに 99 件処理したと申告する。
     let second: Synced = post_sync(
         &server,
         &sync_request_with_applied(&alice.session_id, first.next_tick, 99),
@@ -587,7 +584,7 @@ async fn reports_desync_to_everyone() {
         post_sync(&server, &sync_request_with_applied(&alice.session_id, 0, 0))
             .await
             .msgpack();
-    bob_reply.await.expect("Bob のsync_requestが終わりません");
+    bob_reply.await.expect("Bob の同期が終わりません");
 
     assert!(
         alice_synced.desync,
@@ -625,7 +622,7 @@ async fn drops_users_that_stop_responding() {
     let alice = create_room(&server, 2).await;
     let bob = join_room(&server, &alice.code(), "Bob").await;
 
-    // Bob は一度もsync_requestしない。保持数を超えて応答が無ければ部屋から外れる。
+    // Bob は一度も同期しない。保持数を超えて応答が無ければ部屋から外れる。
     let mut users = Vec::new();
     let mut cursor = 0;
     for _ in 0..8 {
@@ -802,7 +799,7 @@ async fn removes_a_room_once_everyone_is_gone() {
     };
     let alice = create_room(&server, 2).await;
 
-    // Alice がsync_requestを止めれば、保持数を超えたところで部屋には誰もいなくなる。
+    // Alice が同期を止めれば、保持数を超えたところで部屋には誰もいなくなる。
     tokio::time::sleep(Duration::from_millis(400)).await;
     let reply = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);

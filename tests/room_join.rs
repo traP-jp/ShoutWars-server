@@ -98,7 +98,7 @@ async fn joiner_id_is_greater_than_the_owner() {
         .await
         .msgpack();
 
-    // UUIDv7 はjoin_request順に増える。昇順に並べれば先頭が部屋主になる。
+    // UUIDv7 は参加順に増える。昇順に並べれば先頭が部屋主になる。
     assert!(
         created.user_id < joined.user_id,
         "部屋主 {} より若い ID が振られました: {}",
