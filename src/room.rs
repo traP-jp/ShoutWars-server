@@ -211,6 +211,19 @@ impl Room {
         now >= self.lifetime_deadline(config)
     }
 
+    /// 全員の応答が保持期間ぶん途絶えているか。
+    ///
+    /// 誰も同期しなくなった部屋は `advance` が呼ばれず、`open_tick` が止まったまま
+    /// 寿命まで居座る。番号と容量を握り続けるので、経過時間から今の tick を求めて判定する。
+    /// 規則は `drop_silent` と同じであり、片方だけを緩めてはならない。
+    pub fn is_abandoned(&self, config: &Config, now: Instant) -> bool {
+        let elapsed = now.saturating_duration_since(self.created_at).as_nanos();
+        let current = u64::try_from(elapsed / config.tick.as_nanos()).unwrap_or(u64::MAX);
+        let limit = u64::try_from(config.record_retention).unwrap_or(u64::MAX);
+        let deadline = current.saturating_sub(limit);
+        self.users.iter().all(|user| user.last_seen < deadline)
+    }
+
     /// 現在イベントを受け付けているレコードの tick 番号。
     pub fn open_tick(&self) -> u64 {
         self.open_tick

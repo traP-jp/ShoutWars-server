@@ -808,6 +808,20 @@ async fn removes_a_room_once_everyone_is_gone() {
     assert_eq!(status.room_count, 0, "誰もいない部屋が残っています");
 }
 #[tokio::test]
+async fn removes_an_abandoned_room_without_any_sync() {
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
+    create_room(&server, 2).await;
+
+    // 誰もその部屋に触れない。sync が来なくても、保持期間を過ぎれば掃除される。
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let status: Status = server.get("/v3/status").send().await.msgpack();
+    assert_eq!(status.room_count, 0, "放棄された部屋が残っています");
+}
+
+#[tokio::test]
 async fn resending_does_not_duplicate_an_event() {
     let Some(server) = TestServer::with_config(config()).await else {
         return;

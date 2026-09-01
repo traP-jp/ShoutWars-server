@@ -39,19 +39,23 @@ pub struct Inner {
 const NUMBERING_ATTEMPTS: usize = 32;
 
 impl Inner {
-    /// 期限切れの部屋を取り除く。
+    /// 使われなくなった部屋を取り除く。
     fn sweep(&mut self) {
         let now = Instant::now();
         let config = &self.config;
         let sessions = &mut self.sessions;
         self.by_number.retain(|_, room| {
-            if !room.is_expired(config, now) {
+            let reason = if room.is_expired(config, now) {
+                "期限切れ"
+            } else if room.is_abandoned(config, now) {
+                "全員の応答が途絶えた"
+            } else {
                 return true;
-            }
+            };
             for user in &room.users {
                 sessions.remove(&user.session_id);
             }
-            tracing::info!(number = %room.number, "期限切れの部屋を削除しました");
+            tracing::info!(number = %room.number, reason, "部屋を削除しました");
             false
         });
     }
