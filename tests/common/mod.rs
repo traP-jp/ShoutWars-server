@@ -182,6 +182,21 @@ impl Reply {
         T::deserialize(&mut deserializer).expect("本文を MessagePack として読めません")
     }
 
+    /// 200 であることを確かめてから本文を読む。
+    ///
+    /// 直接 `msgpack` を呼ぶと、エラーが返ったときに「MessagePack として読めません」
+    /// としか出ず、何が起きたのか分からなくなる。
+    pub fn expect_ok<T: DeserializeOwned>(&self) -> T {
+        assert_eq!(
+            self.status,
+            StatusCode::OK,
+            "成功を期待したが {} が返った ({})",
+            self.status,
+            self.error_code()
+        );
+        self.msgpack()
+    }
+
     /// エラー本文を読み、`code` を返す。
     ///
     /// `message` が空でないことも確かめる。UI に表示される値であり、

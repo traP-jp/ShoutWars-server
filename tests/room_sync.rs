@@ -393,6 +393,7 @@ async fn send_room_info(server: &TestServer, session_id: &str, info: &str) {
 }
 
 async fn read_room_info(server: &TestServer, code: &str, name: &str) -> Option<String> {
+    // エラー本文も `Option` の `None` として読めてしまうため、状態を先に確かめる。
     let joined: RoomInfoOnly = server
         .post(
             "/v3/room/join",
@@ -406,7 +407,7 @@ async fn read_room_info(server: &TestServer, code: &str, name: &str) -> Option<S
         )
         .send()
         .await
-        .msgpack();
+        .expect_ok();
     joined.room_info
 }
 
@@ -630,7 +631,7 @@ async fn drops_users_that_stop_responding() {
     for _ in 0..8 {
         let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, cursor))
             .await
-            .msgpack();
+            .expect_ok();
         cursor = synced.next_tick;
         users = synced.room_users;
         if users.len() == 1 {
@@ -674,24 +675,10 @@ async fn marks_late_users_as_absent() {
     assert!(!alice_user.absent);
 }
 
-#[tokio::test]
-async fn rejects_oversized_data() {
-    let Some(server) = TestServer::with_config(config()).await else {
-        return;
-    };
-    let alice = create_room(&server, 2).await;
-
-    let mut body = sync_request(&alice.session_id, 0);
-    body.actions = vec![OutEvent {
-        id: Uuid::now_v7().to_string(),
-        kind: "attack".to_owned(),
-        data: "あ".repeat(8 * 1024),
-    }];
-    let reply = post_sync(&server, &body).await;
-
-    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
-    assert_eq!(reply.error_code(), "limit_exceeded");
-}
+/// MessagePack の文字列は、長さ 256〜65535 なら 3 バイトの見出しが付く。
+/// 上限は符号化後の大きさで測るので、境界はその分だけ内側にある。
+const DATA_LIMIT: usize = 8 * 1024 - 3;
+const ROOM_INFO_LIMIT: usize = 64 * 1024 - 3;
 
 #[tokio::test]
 async fn accepts_data_at_the_limit() {
@@ -704,23 +691,82 @@ async fn accepts_data_at_the_limit() {
     body.actions = vec![OutEvent {
         id: Uuid::now_v7().to_string(),
         kind: "attack".to_owned(),
-        // 文字列の符号化には長さの分も乗るため、上限より少し小さく取る。
-        data: "a".repeat(8 * 1024 - 8),
+        data: "a".repeat(DATA_LIMIT),
     }];
-    let reply = post_sync(&server, &body).await;
 
-    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(post_sync(&server, &body).await.status, StatusCode::OK);
 }
 
 #[tokio::test]
-async fn rejects_oversized_room_info() {
+async fn rejects_data_one_byte_over_the_limit() {
     let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
-    body.room_info = Some("あ".repeat(64 * 1024));
+    body.actions = vec![OutEvent {
+        id: Uuid::now_v7().to_string(),
+        kind: "attack".to_owned(),
+        data: "a".repeat(DATA_LIMIT + 1),
+    }];
+    let reply = post_sync(&server, &body).await;
+
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert_eq!(reply.error_code(), "limit_exceeded");
+}
+
+#[tokio::test]
+async fn accepts_room_info_at_the_limit() {
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+
+    let mut body = sync_request(&alice.session_id, 0);
+    body.room_info = Some("a".repeat(ROOM_INFO_LIMIT));
+
+    assert_eq!(post_sync(&server, &body).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn rejects_room_info_one_byte_over_the_limit() {
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+
+    let mut body = sync_request(&alice.session_id, 0);
+    body.room_info = Some("a".repeat(ROOM_INFO_LIMIT + 1));
+    let reply = post_sync(&server, &body).await;
+
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert_eq!(reply.error_code(), "limit_exceeded");
+}
+
+#[tokio::test]
+async fn accepts_the_maximum_number_of_events() {
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+
+    let mut body = sync_request(&alice.session_id, 0);
+    body.actions = (0..64).map(|_| event("attack", "x")).collect();
+    body.reports = (0..64).map(|_| event("position", "x")).collect();
+
+    assert_eq!(post_sync(&server, &body).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn rejects_too_many_reports() {
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+
+    let mut body = sync_request(&alice.session_id, 0);
+    body.reports = (0..65).map(|_| event("position", "x")).collect();
     let reply = post_sync(&server, &body).await;
 
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
