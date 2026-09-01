@@ -57,6 +57,18 @@ jobs:
         with:
           persist-credentials: false
       - run: docker build -t shoutwars-server .
+      # 起動まで確かめる。構築側と実行側の Debian がずれると glibc が合わず、
+      # ビルドは通るのに起動しない。イメージにシェルは無いので外から叩く。
+      - name: Run the image
+        run: |
+          docker run -d --rm --name check -p 7468:7468 -e ROOM_LIMIT=3 shoutwars-server
+          for _ in $(seq 30); do
+            curl -sf -o /dev/null http://127.0.0.1:7468/v3/status && break
+            sleep 1
+          done
+          curl -sf -o /dev/null http://127.0.0.1:7468/v3/status
+          docker logs check
+          docker stop check
 
   audit:
     name: cargo audit
