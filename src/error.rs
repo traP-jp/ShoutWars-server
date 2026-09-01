@@ -22,6 +22,9 @@ pub enum Error {
     InvalidSession,
     NotOwner,
     AlreadySynced,
+    /// 定義されていないパス。クライアントが古い場合にここへ落ちる。
+    NotFound,
+    MethodNotAllowed,
     RoomNotFound,
     VersionMismatch,
     RoomFull,
@@ -43,6 +46,7 @@ impl Error {
             Self::InvalidSession => "invalid_session",
             Self::NotOwner => "not_owner",
             Self::AlreadySynced => "already_synced",
+            Self::NotFound | Self::MethodNotAllowed => "not_found",
             Self::RoomNotFound => "room_not_found",
             Self::VersionMismatch => "version_mismatch",
             Self::RoomFull => "room_full",
@@ -59,7 +63,8 @@ impl Error {
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::Unauthorized | Self::InvalidSession => StatusCode::UNAUTHORIZED,
             Self::NotOwner | Self::AlreadySynced => StatusCode::FORBIDDEN,
-            Self::RoomNotFound => StatusCode::NOT_FOUND,
+            Self::NotFound | Self::RoomNotFound => StatusCode::NOT_FOUND,
+            Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
             Self::VersionMismatch | Self::RoomFull | Self::GameStarted => StatusCode::CONFLICT,
             Self::SyncTooOld => StatusCode::GONE,
             Self::RoomLimitReached => StatusCode::SERVICE_UNAVAILABLE,
@@ -76,6 +81,10 @@ impl Error {
             Self::InvalidSession => "接続が切れました。参加し直してください。".to_owned(),
             Self::NotOwner => "部屋主のみが実行できます。".to_owned(),
             Self::AlreadySynced => "同じ tick に二重に同期しようとしました。".to_owned(),
+            Self::NotFound => {
+                "そのエンドポイントはありません。ゲームを更新してください。".to_owned()
+            }
+            Self::MethodNotAllowed => "そのメソッドでは受け付けていません。".to_owned(),
             Self::RoomNotFound => "部屋が見つかりません。番号を確認してください。".to_owned(),
             Self::VersionMismatch => {
                 "バージョンが異なります。ゲームを更新してください。".to_owned()

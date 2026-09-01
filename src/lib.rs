@@ -24,7 +24,7 @@ use axum::{
 };
 use tokio::net::TcpListener;
 
-use crate::config::Config;
+use crate::{config::Config, error::Error};
 
 /// 本文の上限。これを超えるリクエストは読まずに拒む。
 const BODY_LIMIT: usize = 1024 * 1024;
@@ -51,6 +51,10 @@ pub fn app(config: &Config) -> Router {
         .route("/v3/room/join", post(api::join::join))
         .route("/v3/room/start", post(api::start::start))
         .route("/v3/room/sync", post(api::sync::sync))
+        // 定義されていないパスやメソッドにも、決めた形のエラーを返す。
+        // 古いクライアントはここへ落ちるため、理由を読み取れるようにする。
+        .fallback(|| async { Error::NotFound })
+        .method_not_allowed_fallback(|| async { Error::MethodNotAllowed })
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_password,

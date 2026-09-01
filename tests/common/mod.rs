@@ -152,10 +152,12 @@ impl Request {
                     .expect("Content-Type が ASCII ではありません")
             })
             .map(ToOwned::to_owned);
+        let headers = response.headers().clone();
         let body = response.bytes().await.expect("本文を受け取れません");
         Reply {
             status,
             content_type,
+            headers,
             body: body.to_vec(),
         }
     }
@@ -165,6 +167,7 @@ impl Request {
 pub struct Reply {
     pub status: StatusCode,
     pub content_type: Option<String>,
+    pub headers: reqwest::header::HeaderMap,
     pub body: Vec<u8>,
 }
 
