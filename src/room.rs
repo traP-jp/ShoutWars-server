@@ -1,7 +1,7 @@
 //! 部屋とユーザー。
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     fmt,
     str::FromStr,
     time::{Duration, Instant},
@@ -143,8 +143,6 @@ pub struct Room {
     pending: HashMap<Uuid, Pending>,
     /// 締め切り済みのレコード。古いものから捨てる。
     closed: VecDeque<Record>,
-    /// 直前のレコードに間に合わなかったユーザー。バリアの待機対象から外す。
-    absent: HashSet<Uuid>,
     /// 保持期間から落ちたレコードまでの累計配信数。
     delivered_before: HashMap<Uuid, u64>,
     /// 食い違いを検出したか。一度立てば全員に通知し続ける。
@@ -192,7 +190,6 @@ impl Room {
             open_tick: 0,
             pending: HashMap::new(),
             closed: VecDeque::new(),
-            absent: HashSet::new(),
             delivered_before: HashMap::new(),
             desync: false,
             closed_notify: watch::Sender::new(None),
@@ -235,33 +232,17 @@ impl Room {
         self.drop_silent(retention)
     }
 
-    /// 待機対象の全員が到着したか。不在のユーザーは待たない。
-    pub fn everyone_arrived(&self) -> bool {
-        !self.pending.is_empty()
-            && self
-                .users
-                .iter()
-                .filter(|user| !self.absent.contains(&user.id))
-                .all(|user| self.pending.contains_key(&user.id))
-    }
-
     /// 開いているレコードを締め切り、同時に次を開く。
     pub fn close(&mut self) {
         let tick = self.open_tick;
         let pending = std::mem::take(&mut self.pending);
-        self.absent = self
-            .users
-            .iter()
-            .map(|user| user.id)
-            .filter(|id| !pending.contains_key(id))
-            .collect();
         let users = self
             .users
             .iter()
             .map(|user| UserSnapshot {
                 id: user.id,
                 name: user.name.clone(),
-                absent: self.absent.contains(&user.id),
+                absent: !pending.contains_key(&user.id),
             })
             .collect();
 
@@ -392,8 +373,6 @@ impl Room {
             dropped.push(user.session_id);
             false
         });
-        self.absent
-            .retain(|id| self.users.iter().any(|user| user.id == *id));
         dropped
     }
 

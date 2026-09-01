@@ -291,6 +291,8 @@ async fn rejects_a_cursor_that_is_too_old() {
             last = Some(reply);
             break;
         }
+        // 同じ窓へ二度送らないよう、tick 幅を空ける。
+        tokio::time::sleep(config().tick).await;
     }
 
     let reply = last.expect("保持期間を超えても拒まれませんでした");
@@ -454,39 +456,58 @@ impl Member {
 }
 
 #[tokio::test]
-async fn events_from_older_records_carry_a_tick() {
+async fn the_last_record_carries_no_tick() {
     let Some(server) = TestServer::with_config(config()).await else {
         return;
     };
     let alice = create_room(&server, 2).await;
 
-    // 一人だけの部屋では、預けた時点で全員到着となり即座に締め切られる。
-    let mut first = sync_request(&alice.session_id, 0);
+    let mut body = sync_request(&alice.session_id, 0);
+    body.actions = vec![event("attack", "A")];
+    let synced: Synced = post_sync(&server, &body).await.msgpack();
+
+    assert_eq!(synced.actions.len(), 1);
+    assert_eq!(
+        synced.actions[0].tick, None,
+        "最後のレコードの event には番号を付けない"
+    );
+}
+
+#[tokio::test]
+async fn older_records_carry_a_tick() {
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+
     let first_id = Uuid::now_v7().to_string();
+    let mut first = sync_request(&alice.session_id, 0);
     first.actions = vec![OutEvent {
         id: first_id.clone(),
         kind: "attack".to_owned(),
         data: "A".to_owned(),
     }];
-    post_sync(&server, &first).await;
+    let first: Synced = post_sync(&server, &first).await.msgpack();
 
-    let mut second = sync_request(&alice.session_id, 0);
+    let mut second = sync_request(&alice.session_id, first.next_tick);
     second.actions = vec![event("attack", "B")];
-    let synced: Synced = post_sync(&server, &second).await.msgpack();
+    post_sync(&server, &second).await;
 
-    assert_eq!(synced.actions.len(), 2, "2 レコードぶんがまとまって返る");
-    assert_eq!(synced.actions[0].data, "A");
+    // 先頭から取り直すと、2 つの event は別のレコードに入って返る。
+    let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
+        .await
+        .msgpack();
+
+    let data: Vec<&str> = synced.actions.iter().map(|e| e.data.as_str()).collect();
+    assert_eq!(data, ["A", "B"], "送った順に並ぶ");
     assert_eq!(synced.actions[0].id, first_id, "event ID はそのまま返る");
-    assert_eq!(
-        synced.actions[0].tick,
-        Some(0),
-        "最後以外のレコードには番号が付く"
-    );
-    assert_eq!(synced.actions[1].data, "B");
-    assert_eq!(
-        synced.actions[1].tick, None,
-        "最後のレコードのeventには番号を付けない"
-    );
+    let older = synced.actions[0]
+        .tick
+        .expect("最後以外のレコードには番号が付く");
+    // 最後のレコードに入っていれば番号は付かない。
+    if let Some(newer) = synced.actions[1].tick {
+        assert!(newer > older, "後の event が古いレコードに入っています");
+    }
 }
 
 fn sync_request_with_applied(session_id: &str, next_tick: u64, applied: u64) -> Sync {

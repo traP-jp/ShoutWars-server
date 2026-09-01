@@ -190,7 +190,7 @@ impl Inner {
             .sessions
             .get(&request.session_id)
             .ok_or(Error::InvalidSession)?;
-        let (tick, retention) = (self.config.tick, self.config.record_retention);
+        let tick = self.config.tick;
         self.refresh(session.room)?;
         // 自分が外されていれば、以降の処理はできない。
         let session = *self
@@ -233,10 +233,6 @@ impl Inner {
                 attach(deposit.reports),
                 attach(deposit.actions),
             );
-            if room.everyone_arrived() {
-                room.close();
-                room.trim(retention);
-            }
         }
 
         if room.records_from(request.next_tick).next().is_some() {
