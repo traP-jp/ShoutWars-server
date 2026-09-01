@@ -211,7 +211,7 @@ async fn rejects_when_the_room_limit_is_reached() {
         .send()
         .await;
 
-    assert_eq!(reply.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(reply.status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(reply.error_code(), "room_limit_reached");
 }
 

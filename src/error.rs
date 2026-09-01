@@ -67,7 +67,9 @@ impl Error {
             Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
             Self::VersionMismatch | Self::RoomFull | Self::GameStarted => StatusCode::CONFLICT,
             Self::SyncTooOld => StatusCode::GONE,
-            Self::RoomLimitReached => StatusCode::SERVICE_UNAVAILABLE,
+            // 意味の上では 503 が近いが、5xx は経路上のプロキシに本文を差し替えられ、
+            // クライアントが code を読めなくなる。届く範囲で最も近い 4xx を選ぶ。
+            Self::RoomLimitReached => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
