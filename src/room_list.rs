@@ -1,0 +1,351 @@
+//! 部屋の登録簿。
+//!
+//! 単一スレッドで動かすが、ハンドラは `Send` を要求されるため `std::sync::Mutex` で包む。
+//! 標準の `MutexGuard` は `!Send` なので、ロックを持ったまま `.await` するとコンパイルが通らない。
+//! 待機を跨いでロックを保持する不具合が型で防がれる。
+
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Instant,
+};
+
+use rmpv::Value;
+use uuid::Uuid;
+
+use crate::{
+    config::Config,
+    error::Error,
+    record::Incoming,
+    room::{Room, RoomNumber, User},
+};
+
+/// セッションが指す先。
+#[derive(Debug, Clone, Copy)]
+pub struct Session {
+    pub room: RoomNumber,
+    pub user: Uuid,
+}
+
+/// 登録簿の中身。[`RoomList::lock`] を通してのみ触れる。
+#[derive(Debug)]
+pub struct Inner {
+    config: Arc<Config>,
+    by_number: HashMap<RoomNumber, Room>,
+    sessions: HashMap<Uuid, Session>,
+}
+
+/// 参加コードの引き直しの上限。無いと、コードが埋まってきたときに際限なく回る。
+const NUMBERING_ATTEMPTS: usize = 32;
+
+impl Inner {
+    /// 期限切れの部屋を取り除く。
+    fn sweep(&mut self) {
+        let now = Instant::now();
+        let config = &self.config;
+        let sessions = &mut self.sessions;
+        self.by_number.retain(|_, room| {
+            if !room.is_expired(config, now) {
+                return true;
+            }
+            for user in &room.users {
+                sessions.remove(&user.session_id);
+            }
+            tracing::info!(number = %room.number, "期限切れの部屋を削除しました");
+            false
+        });
+    }
+
+    pub fn count(&mut self) -> usize {
+        self.sweep();
+        self.by_number.len()
+    }
+
+    /// 部屋を作る。
+    ///
+    /// # Errors
+    /// 部屋数が上限に達している場合、または番号を採れなかった場合。
+    pub fn create(&mut self, version: String, owner: User, size: usize) -> Result<&Room, Error> {
+        self.sweep();
+        if self.by_number.len() >= self.config.room_limit {
+            return Err(Error::RoomLimitReached);
+        }
+        let number = self.take_number()?;
+        let (session_id, user) = (owner.session_id, owner.id);
+        // 失敗し得る処理をすべて終えてからセッションを登録する。
+        // 先に登録すると、部屋の作成に失敗したときに指す先の無いセッションが残る。
+        let room = Room::new(number, version, owner, size)?;
+        self.sessions
+            .insert(session_id, Session { room: number, user });
+        tracing::info!(id = %room.id, %number, size, "部屋を作成しました");
+        Ok(self.by_number.entry(number).or_insert(room))
+    }
+
+    /// 部屋に参加する。
+    ///
+    /// # Errors
+    /// 部屋が無い・期限切れ・バージョン不一致・開始済み・満員・名前が長すぎる場合。
+    pub fn join(
+        &mut self,
+        number: RoomNumber,
+        version: &str,
+        name: String,
+    ) -> Result<Joined, Error> {
+        self.sweep();
+        // 参加者はいま開いているレコードから受け取る。
+        self.refresh(number)?;
+        // 期限切れは sweep で消えているため、ここに残っていれば有効な部屋である。
+        let room = self.by_number.get_mut(&number).ok_or(Error::RoomNotFound)?;
+        if room.version != version {
+            return Err(Error::VersionMismatch);
+        }
+        if room.started_at.is_some() {
+            return Err(Error::GameStarted);
+        }
+        if room.is_full() {
+            return Err(Error::RoomFull);
+        }
+
+        let mut user = User::new(name)?;
+        // 参加した時点を最後の応答とみなす。0 のままだと即座に脱落と判定される。
+        user.last_seen = room.open_tick();
+        let joined = Joined {
+            session_id: user.session_id,
+            user_id: user.id,
+            room_id: room.id,
+            room_info: room.info.clone(),
+            next_tick: room.open_tick(),
+        };
+        self.sessions.insert(
+            user.session_id,
+            Session {
+                room: number,
+                user: user.id,
+            },
+        );
+        tracing::info!(id = %room.id, %number, user_id = %user.id, "部屋に参加しました");
+        // ユーザー ID は UUIDv7 で単調に増えるため、末尾へ足せば昇順が保たれる。
+        room.users.push(user);
+        Ok(joined)
+    }
+
+    /// レコードを締め切り、応答の途絶えたユーザーを外す。
+    ///
+    /// # Errors
+    /// 部屋が無い場合。
+    fn refresh(&mut self, number: RoomNumber) -> Result<(), Error> {
+        let (tick, retention) = (self.config.tick, self.config.record_retention);
+        let room = self.by_number.get_mut(&number).ok_or(Error::RoomNotFound)?;
+        let dropped = room.advance(tick, Instant::now(), retention);
+        room.trim(retention);
+        let empty = room.users.is_empty();
+        for id in dropped {
+            self.sessions.remove(&id);
+        }
+        // 全員が脱落した部屋は誰も同期しない。期限まで番号を抱えたままにしない。
+        if empty {
+            self.by_number.remove(&number);
+            tracing::info!(%number, "誰もいなくなった部屋を削除しました");
+        }
+        Ok(())
+    }
+
+    /// ゲームを開始する。
+    ///
+    /// # Errors
+    /// セッションが無効、部屋主でない、または既に開始している場合。
+    pub fn start(&mut self, session_id: Uuid) -> Result<(), Error> {
+        self.sweep();
+        // セッションの検証を先に行い、部屋の存在に言及しない。
+        let session = *self
+            .sessions
+            .get(&session_id)
+            .ok_or(Error::InvalidSession)?;
+        let room = self
+            .by_number
+            .get_mut(&session.room)
+            .ok_or(Error::RoomNotFound)?;
+        if room.owner_id() != Some(session.user) {
+            return Err(Error::NotOwner);
+        }
+        if room.started_at.is_some() {
+            return Err(Error::GameStarted);
+        }
+        room.started_at = Some(Instant::now());
+        tracing::info!(id = %room.id, number = %room.number, "ゲームを開始しました");
+        Ok(())
+    }
+
+    /// 同期する。
+    ///
+    /// 返せるレコードがまだ無ければ [`SyncOutcome::Wait`] を返す。
+    /// 呼び出し側は期限まで待って、もう一度呼ぶ。イベントは最初の 1 回だけ預ける。
+    ///
+    /// # Errors
+    /// セッションが無効、二重同期、保持期間外の `next_tick` などの場合。
+    pub fn sync(&mut self, request: SyncRequest) -> Result<SyncOutcome, Error> {
+        self.sweep();
+        let session = *self
+            .sessions
+            .get(&request.session_id)
+            .ok_or(Error::InvalidSession)?;
+        let tick = self.config.tick;
+        self.refresh(session.room)?;
+        // 自分が外されていれば、以降の処理はできない。
+        let session = *self
+            .sessions
+            .get(&request.session_id)
+            .ok_or(Error::InvalidSession)?;
+        let room = self
+            .by_number
+            .get_mut(&session.room)
+            .ok_or(Error::RoomNotFound)?;
+        let is_owner = room.owner_id() == Some(session.user);
+
+        if let Some(deposit) = request.deposit {
+            if room.has_deposited(session.user) {
+                return Err(Error::AlreadySynced);
+            }
+            if request.next_tick > room.open_tick() {
+                return Err(Error::BadRequest(
+                    "next_tick が未来のレコードを指しています。".to_owned(),
+                ));
+            }
+            if room
+                .oldest_tick()
+                .is_some_and(|oldest| request.next_tick < oldest)
+            {
+                return Err(Error::SyncTooOld);
+            }
+            if is_owner && let Some(info) = deposit.room_info {
+                room.queue_info(info);
+            }
+            let attach = |events: Vec<Incoming>| {
+                events
+                    .into_iter()
+                    .map(|event| event.sent_by(session.user))
+                    .collect()
+            };
+            room.check_applied(session.user, request.next_tick, deposit.applied);
+            room.deposit(
+                session.user,
+                attach(deposit.reports),
+                attach(deposit.actions),
+            );
+        }
+
+        if room.records_from(request.next_tick).next().is_some() {
+            return Ok(SyncOutcome::Ready(session.user));
+        }
+        Ok(SyncOutcome::Wait {
+            deadline: room.record_deadline(tick),
+        })
+    }
+
+    /// セッションが属する部屋。
+    ///
+    /// # Errors
+    /// セッションが無効、または部屋が消えている場合。
+    pub fn room_of(&self, session_id: Uuid) -> Result<&Room, Error> {
+        let session = self
+            .sessions
+            .get(&session_id)
+            .ok_or(Error::InvalidSession)?;
+        self.by_number.get(&session.room).ok_or(Error::RoomNotFound)
+    }
+
+    /// 空いている参加コードを引く。使用中なら引き直す。
+    ///
+    /// 順番に採番する方式へ変えてはならない。連番だと直前に消えた番号がすぐ次の部屋へ渡り、
+    /// 古い番号を握ったままのクライアントが他人の部屋へ入る。防ぐには再利用の猶予が要る。
+    /// 乱数であれば、6 桁 100 万通りに対し同時に存在する部屋は `ROOM_LIMIT` 程度なので、
+    /// 直前に消えた番号が再び振られる確率は無視でき、猶予そのものが不要になる。
+    fn take_number(&self) -> Result<RoomNumber, Error> {
+        (0..NUMBERING_ATTEMPTS)
+            .map(|_| RoomNumber::random())
+            .find(|number| !self.by_number.contains_key(number))
+            .ok_or(Error::RoomLimitReached)
+    }
+}
+
+/// `sync` に預ける内容。
+#[derive(Debug)]
+pub struct SyncRequest {
+    pub session_id: Uuid,
+    pub next_tick: u64,
+    /// 2 回目以降の呼び出しでは `None`。イベントを二重に預けないため。
+    pub deposit: Option<Deposit>,
+}
+
+#[derive(Debug)]
+pub struct Deposit {
+    pub applied: u64,
+    pub reports: Vec<Incoming>,
+    pub actions: Vec<Incoming>,
+    pub room_info: Option<Value>,
+}
+
+#[derive(Debug)]
+pub enum SyncOutcome {
+    /// 返せるレコードがある。値は送信者のユーザー ID。
+    Ready(Uuid),
+    /// まだ無い。開いているレコードの期限まで待つ。
+    Wait { deadline: Instant },
+}
+
+/// `join` の結果。部屋への借用を返さずに済むよう、必要な値だけ取り出す。
+#[derive(Debug)]
+pub struct Joined {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub room_id: Uuid,
+    pub room_info: Value,
+    pub next_tick: u64,
+}
+
+/// 部屋とセッションの登録簿。ハンドラ間で共有する。
+#[derive(Debug, Clone)]
+pub struct RoomList(Arc<Mutex<Inner>>);
+
+impl RoomList {
+    #[must_use]
+    pub fn new(config: Arc<Config>) -> Self {
+        Self(Arc::new(Mutex::new(Inner {
+            config,
+            by_number: HashMap::new(),
+            sessions: HashMap::new(),
+        })))
+    }
+
+    /// ロックを取る。
+    ///
+    /// 毒された場合は復帰させる。登録簿は不変条件を跨いで壊れる構造を持たず、
+    /// 1 部屋の panic で以降の全リクエストを落とす方が損害が大きい。
+    pub fn lock(&self) -> MutexGuard<'_, Inner> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 部屋の作成に失敗したとき、セッションが残らないこと。
+    ///
+    /// 残ると、指す先の無いセッションが掃除の対象にならず永久に溜まる。
+    /// 人数が範囲外の `create` を繰り返すだけでメモリを枯渇させられる。
+    #[test]
+    fn a_failed_create_leaves_no_session() {
+        let rooms = RoomList::new(Arc::new(Config::default()));
+        let mut inner = rooms.lock();
+
+        let owner = User::new("Alice".to_owned()).expect("名前は正しい");
+        let result = inner.create("1.0".to_owned(), owner, 99);
+
+        assert!(result.is_err(), "人数 99 は拒まれる");
+        assert!(inner.sessions.is_empty(), "セッションが残っています");
+        assert!(inner.by_number.is_empty(), "部屋が残っています");
+    }
+}
