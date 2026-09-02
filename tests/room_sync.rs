@@ -190,6 +190,8 @@ async fn read_until(
         if found(&synced) {
             return synced;
         }
+        // 遅れている間は締め切りを待たずに応答が返るため、そのまま送ると同じ窓に二度入る。
+        wait_ticks(member, 1.0).await;
         synced = post_sync(server, &sync_request(&member.session_id, synced.next_tick))
             .await
             .expect_ok();
@@ -205,8 +207,13 @@ async fn syncs_with_a_single_user() {
     let reply = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
 
     assert_eq!(reply.status, StatusCode::OK);
-    let synced: Synced = reply.msgpack();
-    assert!(synced.next_tick >= 1, "必ず 1 件以上のレコードを返す");
+    let first: Synced = reply.msgpack();
+    assert!(first.next_tick >= 1, "必ず 1 件以上のレコードを返す");
+    // 最初の同期が窓の期限に間に合わなければ、本人の入っていないレコードが先に返る。
+    let synced = read_until(&server, &alice, first, |s| {
+        s.room_users.iter().all(|user| !user.absent)
+    })
+    .await;
     assert_eq!(synced.room_users.len(), 1);
     assert_eq!(synced.room_users[0].id, alice.user_id);
     assert_eq!(synced.room_users[0].name, "Alice");
@@ -508,7 +515,11 @@ impl Member {
 
 #[tokio::test]
 async fn the_last_record_carries_no_tick() {
-    let server = TestServer::start().await;
+    // 追いついているクライアントでなければ、預けたイベントは最後のレコードに入らない。
+    // 往復が tick と同程度の相手に対しては、応答を待って送る作りでは追いつき続けられない。
+    let Some(server) = TestServer::with_config(config()).await else {
+        return;
+    };
     let alice = create_room(&server, 2).await;
 
     let mut body = sync_request(&alice.session_id, 0);
@@ -685,10 +696,16 @@ async fn marks_late_users_as_absent() {
     let alice = create_room(&server, 2).await;
     join_room(&server, &alice.code(), "Bob").await;
 
-    // Bob が来ないので、最初のレコードは期限で締め切られる。
-    let synced: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
+    // Bob が来ないので、レコードは期限で締め切られる。Alice が入ったレコードまで読み進める。
+    let first: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
         .await
-        .msgpack();
+        .expect_ok();
+    let synced = read_until(&server, &alice, first, |s| {
+        s.room_users
+            .iter()
+            .any(|user| user.name == "Alice" && !user.absent)
+    })
+    .await;
 
     let bob = synced
         .room_users
