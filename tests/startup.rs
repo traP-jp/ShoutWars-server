@@ -32,17 +32,12 @@ fn refuses_to_start_on_unparsable_value() {
     assert_refuses_to_start(&[
         ("PORT", "ななよんろくはち"),
         ("ROOM_LIMIT", "abc"),
-        ("TICK_MS", "1.5"),
-        ("LOBBY_LIFETIME", ""),
+        ("ROOM_MEMORY_LIMIT", "1.5"),
+        ("ROOM_LIMIT", ""),
     ]);
 }
 
 #[test]
 fn refuses_to_start_on_out_of_range_value() {
-    assert_refuses_to_start(&[
-        ("ROOM_LIMIT", "0"),
-        ("TICK_MS", "0"),
-        ("RECORD_RETENTION", "0"),
-        ("GAME_LIFETIME", "0"),
-    ]);
+    assert_refuses_to_start(&[("ROOM_LIMIT", "0"), ("ROOM_MEMORY_LIMIT", "0")]);
 }

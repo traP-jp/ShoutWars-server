@@ -1,7 +1,8 @@
 use std::{env, fmt, str::FromStr, time::Duration};
 
-/// 環境変数から読む設定。
+/// サーバーの設定。
 ///
+/// 環境変数から読むのは、配備によって変える理由が実在する値だけ ([`Self::from_env`])。
 /// 不正な値は既定値へフォールバックせず、起動を中止する。
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -35,13 +36,16 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// 環境変数が無い場合の値。README の表と一致していなければならない。
+/// 既定値。環境変数で変えられるものは README の表と、
+/// 固定のものは `docs/protocol.md` の記載と一致していなければならない。
 impl Default for Config {
     fn default() -> Self {
         Self {
             port: 7468,
             password: None,
             room_limit: 100,
+            // ゲームの制限時間ではなく、終わらない部屋を回収するための安全枠。
+            // クライアントは残り時間を自前で数え、この値を受け取らない。環境変数にしてはならない。
             lobby_lifetime: Duration::from_mins(10),
             game_lifetime: Duration::from_mins(20),
             // 音声の単語検出に約 0.5 秒かかるため、これより短くしても入力遅延はほとんど縮まらない。
@@ -71,11 +75,8 @@ impl Config {
             port: parse("PORT", default.port)?,
             password: env::var("PASSWORD").ok().filter(|s| !s.is_empty()),
             room_limit: positive("ROOM_LIMIT", default.room_limit)?,
-            lobby_lifetime: minutes("LOBBY_LIFETIME", default.lobby_lifetime)?,
-            game_lifetime: minutes("GAME_LIFETIME", default.game_lifetime)?,
-            tick: millis("TICK_MS", default.tick)?,
-            record_retention: positive("RECORD_RETENTION", default.record_retention)?,
             room_memory_limit: mib("ROOM_MEMORY_LIMIT", default.room_memory_limit)?,
+            ..default
         })
     }
 }
@@ -83,22 +84,6 @@ impl Config {
 /// MiB 単位で指定される大きさをバイト数で読む。
 fn mib(name: &'static str, default: usize) -> Result<usize, ConfigError> {
     Ok(positive(name, default / (1024 * 1024))? * 1024 * 1024)
-}
-
-/// ミリ秒単位で指定される時間を読む。
-fn millis(name: &'static str, default: Duration) -> Result<Duration, ConfigError> {
-    let ms: u64 = default
-        .as_millis()
-        .try_into()
-        .expect("既定値がミリ秒として大きすぎます");
-    Ok(Duration::from_millis(positive(name, ms)?))
-}
-
-/// 分単位で指定される時間を読む。
-fn minutes(name: &'static str, default: Duration) -> Result<Duration, ConfigError> {
-    Ok(Duration::from_secs(
-        positive(name, default.as_secs() / 60)? * 60,
-    ))
 }
 
 fn parse<T>(name: &'static str, default: T) -> Result<T, ConfigError>
