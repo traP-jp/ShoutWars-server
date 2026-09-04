@@ -7,211 +7,66 @@ traP ワンマンソン 2024 レジェンドクリエイターズのゲーム
 
 クライアント: [traP-jp/ShoutWars](https://github.com/traP-jp/ShoutWars)
 
+**通信仕様: [docs/protocol.md](docs/protocol.md)**
+
+## ビルド
+
+[rustup](https://rustup.rs/) が入っていれば、ツールチェインは `rust-toolchain.toml` に従って自動で用意されます。
+
+```sh
+cargo build --release
+```
+
+コンテナで動かす場合は `Dockerfile` を使います。デプロイ先と同じものが手元で再現できます。
+
+```sh
+docker build -t shoutwars-server .
+docker run -p 7468:7468 shoutwars-server
+```
+
 ## 起動方法
 
-### 本番環境
-
-Ubuntu の Docker イメージなどでは
-
 ```sh
-apt update
-apt install -y cmake g++ git wget
-cmake .
-make
+cargo run --release
 ```
 
-でビルドできます。
+ビルド済みのバイナリは `target/release/shoutwars-server` にあります。
+
+## 開発
 
 ```sh
-./ShoutWars_server
+cargo clippy --all-targets   # Lint
+cargo fmt                    # 整形
+cargo test                   # テスト
 ```
 
-でサーバーを起動します。
-
-### 開発環境
-
-CMake, C++, Git がインストールされている環境で
+テストはサーバーを空きポートで起動し、HTTP 越しに叩いて仕様どおりの応答かを確かめる。`TEST_SERVER_URL` を指定すると、代わりにそのサーバーへ同じテストを流す。デプロイ先の確認に使える。
 
 ```sh
-mkdir -p cmake-build-debug
-cd cmake-build-debug
-cmake ..
-make
-cd ..
+TEST_SERVER_URL=https://example.com TEST_SERVER_PASSWORD=... cargo test
 ```
 
-でビルドします。CLion などの IDE では CMake Application を設定すればビルドできます。
+このとき、サーバーの設定に依存するテストは設定を制御できないため実行されない。
 
-```sh
-./cmake-build-debug/ShoutWars_server
-```
-
-でサーバーを起動します。
+push と pull request では `.github/workflows/ci.yml` が同じものを回す。あわせて Dockerfile のビルドと `cargo audit` も確認する。
 
 ## 環境変数
 
-- `PORT`: ポート番号 (デフォルト: `7468`)
-- `PASSWORD`: パスワード (デフォルト: なし)
-- `ROOM_LIMIT`: 部屋数の上限 (デフォルト: `100`)
-- `LOBBY_LIFETIME`: 各部屋のロビーの制限時間 (デフォルト: `10` 分)
-- `GAME_LIFETIME`: 各部屋のゲームの制限時間 (デフォルト: `20` 分)
+| 変数 | 既定値 | 内容 |
+|---|---|---|
+| `PORT` | `7468` | ポート番号 |
+| `PASSWORD` | なし | 設定時は `Authorization: Bearer` を要求する |
+| `ROOM_LIMIT` | `100` | 部屋数の上限 |
+| `ROOM_MEMORY_LIMIT` | `4` | 部屋ごとに保持するイベントの合計 (MiB) |
+
+いずれも起動時に検証する。解釈できない値や範囲外の値は、既定値へ黙ってフォールバックせず、エラーで起動を中止する。
+
+メモリの消費量は `ROOM_LIMIT` × `ROOM_MEMORY_LIMIT` で頭打ちになる。この積が、サーバーに割り当てたメモリに収まるように決めること。
+
+部屋の寿命は環境変数にしていない。クライアントがこの値に依存しており、配備ごとに変えると黙って壊れるためである ([docs/protocol.md](docs/protocol.md))。
+
+tick の幅とレコードの保持数も環境変数にしていないが、こちらは配備によって変える理由が無いためである。仕様書は数値を定めていないので、必要になれば環境変数にできる。
 
 ## API 仕様
 
-Request と Response の body は MessagePack 形式でやり取りします。  
-Content-Type は `application/msgpack` とします。  
-エラーが発生した場合は `4xx` や `5xx` のステータスコードと以下の形式でエラーメッセージを返します。
-
-```msgpack
-{
-  "error": string // エラーメッセージ
-}
-```
-
-環境変数 `PORT` でポート番号を指定できます。デフォルトは `7468` です。  
-環境変数 `PASSWORD` が設定されている場合、リクエストヘッダの `Authorization` に `Bearer ${PASSWORD}` を指定する必要があります。
-
-エンドポイントは `/v2` です。`uuid` は UUIDv7 で生成された文字列としています。  
-また、それ以外のプリミティブでない型はクライアント側の実装に依存します。
-
-### `POST /room/create`
-
-部屋を作成する。
-
-#### Request
-
-```msgpack
-{
-  "version": string, // クライアントのバージョン
-  "user": {
-    "name": string // ユーザー名 (32 文字以内)
-  },
-  "size": number // 部屋の人数 (2~4 の整数)
-}
-```
-
-#### Response
-
-```msgpack
-{
-  "session_id": uuid, // セッション ID
-  "user_id": uuid, // 自分のユーザー ID
-  "id": uuid, // 部屋 ID
-  "name": string // 部屋番号 (6 桁の数字)
-}
-```
-
-### `POST /room/join`
-
-部屋に参加する。
-
-#### Request
-
-```msgpack
-{
-  "version": string, // クライアントのバージョン
-  "name": string, // 部屋番号 (6 桁の数字)
-  "user": {
-    "name": string // ユーザー名 (32 文字以内)
-  }
-}
-```
-
-#### Response
-
-```msgpack
-{
-  "session_id": uuid, // セッション ID
-  "id": uuid, // 部屋 ID
-  "user_id": uuid, // 自分のユーザー ID
-  "room_info": RoomInfo // 部屋情報
-}
-```
-
-### `POST /room/sync`
-
-部屋の情報やゲームの状態を同期する。
-
-部屋の全ユーザーのリクエストが揃ってからレスポンスを返します。クライアントはこのレスポンスを受け取るたびに 100 ms 後に次の同期をリクエストしてください。  
-ただし、最初のリクエストから 50 ms (遅れたユーザーは + 200 ms) 以上経過したら即座にレスポンスを返し、遅れたユーザーのイベントは次の同期に持ち越します。  
-10 秒間リクエストの無いユーザーは脱落となります。
-
-#### Request
-
-```msgpack
-{
-  "session_id": uuid, // セッション ID
-  "room_info": RoomInfo, // 部屋情報
-  "reports": [{ // 報告イベント
-    "id": uuid, // イベント ID
-    "type": string, // イベントの種類
-    "event": Event // イベントの内容
-  }],
-  "actions": [{ // 確認イベント
-    "id": uuid, // イベント ID
-    "type": string, // イベントの種類
-    "event": Event // イベントの内容
-  }]
-}
-```
-
-#### Response
-
-```msgpack
-{
-  "id": uuid, // 同期 ID
-  "reports": [{ // 報告イベント (id でソートされます)
-    "id": uuid, // イベント ID
-    "sync_id": uuid, // このイベントが送信されるはずだった同期 ID (今回の同期 ID と異なる場合のみ)
-    "from": uuid, // 送信元のユーザー ID
-    "type": string, // イベントの種類
-    "event": Event // イベントの内容
-  }],
-  "actions": [{ // 確認イベント (id でソートされます)
-    "id": uuid, // イベント ID
-    "sync_id": uuid, // このイベントが送信されるはずだった同期 ID (今回の同期 ID と異なる場合のみ)
-    "from": uuid, // 送信元のユーザー ID
-    "type": string, // イベントの種類
-    "event": Event // イベントの内容
-  }],
-  "room_users": [{ // 部屋のユーザー (最初が部屋主)
-    "id": uuid, // ユーザー ID
-    "name": string // ユーザー名
-  }]
-}
-```
-
-レスポンスを返してから 100 ms 以内にリクエストが来た場合は即座に `429 Too Many Requests` を返します。
-
-### `POST /room/start`
-
-ゲームを開始する。
-
-このリクエストは部屋主のみが送信できます。
-
-#### Request
-
-```msgpack
-{
-  "session_id": uuid // セッション ID
-}
-```
-
-#### Response
-
-```msgpack
-{}
-```
-
-### `GET /status`
-
-サーバーのステータスを取得する。
-
-#### Response
-
-```msgpack
-{
-  "room_count": number, // 部屋数
-  "room_limit": number // 部屋数の上限
-}
-```
+[docs/protocol.md](docs/protocol.md) を参照。
