@@ -89,7 +89,6 @@ impl<'de> Deserialize<'de> for RoomNumber {
 /// 部屋への 1 回の参加。同一人物との対応は保証しない。
 #[derive(Debug)]
 pub struct User {
-    /// UUIDv7。参加順に増えるため、昇順に並べると先頭が部屋主になる。
     pub id: Uuid,
     pub name: String,
     pub session_id: Uuid,
@@ -111,7 +110,7 @@ impl User {
             )));
         }
         Ok(Self {
-            id: Uuid::now_v7(),
+            id: Uuid::new_v4(),
             name,
             // セッション ID は暗号論的乱数で生成する。UUIDv7 を使ってはならない。
             session_id: Uuid::new_v4(),
@@ -130,7 +129,7 @@ pub struct Room {
     pub created_at: Instant,
     /// ゲームを開始した時刻。ロビーの間は `None`。
     pub started_at: Option<Instant>,
-    /// ID 昇順。先頭が部屋主。
+    /// 参加順。先頭が部屋主。
     pub users: Vec<User>,
     /// 遅延参加者へ渡す初期状態。サーバーは中身を解釈しない。
     pub info: Value,
@@ -426,7 +425,7 @@ impl Room {
         self.info_update = Some(info);
     }
 
-    /// 部屋主。ユーザーは ID 昇順に並ぶため、先頭が該当する。
+    /// 部屋主。ユーザーは参加順に並ぶため、先頭が該当する。
     pub fn owner_id(&self) -> Option<Uuid> {
         self.users.first().map(|user| user.id)
     }

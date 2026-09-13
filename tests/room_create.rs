@@ -271,11 +271,4 @@ async fn the_session_id_is_not_a_uuidv7() {
         4,
         "セッション ID が UUIDv4 ではありません"
     );
-    // ユーザー ID は逆に、参加順に増えなければならない。
-    let user = Uuid::parse_str(&created.user_id).expect("UUID として読める");
-    assert_eq!(
-        user.get_version_num(),
-        7,
-        "ユーザー ID が UUIDv7 ではありません"
-    );
 }

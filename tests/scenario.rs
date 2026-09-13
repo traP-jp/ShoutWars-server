@@ -177,14 +177,14 @@ async fn play(server: TestServer, player: usize, member: Player) -> Played {
         };
         if round < ROUNDS {
             let action = OutEvent {
-                id: Uuid::now_v7().to_string(),
+                id: Uuid::new_v4().to_string(),
                 kind: "attack".to_owned(),
                 data: format!("{}:{round}", member.name),
             };
             result.sent.push(action.id.clone());
             body.actions.push(action);
             body.reports.push(OutEvent {
-                id: Uuid::now_v7().to_string(),
+                id: Uuid::new_v4().to_string(),
                 kind: "position".to_owned(),
                 data: format!("{}:{round}", member.name),
             });

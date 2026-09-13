@@ -117,7 +117,7 @@ struct InEvent {
 
 fn event(kind: &str, data: &str) -> OutEvent {
     OutEvent {
-        id: Uuid::now_v7().to_string(),
+        id: Uuid::new_v4().to_string(),
         kind: kind.to_owned(),
         data: data.to_owned(),
     }
@@ -355,7 +355,7 @@ async fn drops_old_records_once_the_room_holds_too_much() {
     for _ in 0..8 {
         let mut body = sync_request(&alice.session_id, 0);
         body.actions = vec![OutEvent {
-            id: Uuid::now_v7().to_string(),
+            id: Uuid::new_v4().to_string(),
             kind: "attack".to_owned(),
             data: "a".repeat(DATA_LIMIT),
         }];
@@ -539,7 +539,7 @@ async fn older_records_carry_a_tick() {
     let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
-    let first_id = Uuid::now_v7().to_string();
+    let first_id = Uuid::new_v4().to_string();
     let mut first = sync_request(&alice.session_id, 0);
     first.actions = vec![OutEvent {
         id: first_id.clone(),
@@ -734,7 +734,7 @@ async fn accepts_data_at_the_limit() {
 
     let mut body = sync_request(&alice.session_id, 0);
     body.actions = vec![OutEvent {
-        id: Uuid::now_v7().to_string(),
+        id: Uuid::new_v4().to_string(),
         kind: "attack".to_owned(),
         data: "a".repeat(DATA_LIMIT),
     }];
@@ -749,7 +749,7 @@ async fn rejects_data_one_byte_over_the_limit() {
 
     let mut body = sync_request(&alice.session_id, 0);
     body.actions = vec![OutEvent {
-        id: Uuid::now_v7().to_string(),
+        id: Uuid::new_v4().to_string(),
         kind: "attack".to_owned(),
         data: "a".repeat(DATA_LIMIT + 1),
     }];
@@ -816,7 +816,7 @@ async fn rejects_an_oversized_body() {
     let mut body = sync_request(&alice.session_id, 0);
     body.actions = (0..64)
         .map(|_| OutEvent {
-            id: Uuid::now_v7().to_string(),
+            id: Uuid::new_v4().to_string(),
             kind: "attack".to_owned(),
             data: "a".repeat(20 * 1024),
         })
@@ -862,7 +862,7 @@ async fn resending_does_not_duplicate_an_event() {
     let server = TestServer::start().await;
     let alice = create_room(&server, 2).await;
 
-    let id = Uuid::now_v7().to_string();
+    let id = Uuid::new_v4().to_string();
     let mut body = sync_request(&alice.session_id, 0);
     body.actions = vec![OutEvent {
         id: id.clone(),
@@ -901,7 +901,7 @@ async fn events_from_one_sender_keep_their_order() {
 }
 
 #[tokio::test]
-async fn room_users_are_sorted_by_id_with_the_owner_first() {
+async fn room_users_are_in_join_order_with_the_owner_first() {
     let server = TestServer::start().await;
     let alice = create_room(&server, 4).await;
     join_room(&server, &alice.code(), "Bob").await;
@@ -911,15 +911,16 @@ async fn room_users_are_sorted_by_id_with_the_owner_first() {
         .await
         .expect_ok();
 
-    let ids: Vec<&str> = synced.room_users.iter().map(|u| u.id.as_str()).collect();
-    let mut sorted = ids.clone();
-    sorted.sort_unstable();
-    assert_eq!(ids, sorted, "ユーザー一覧が ID 昇順ではありません");
+    let names: Vec<&str> = synced.room_users.iter().map(|u| u.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["Alice", "Bob", "Charlie"],
+        "ユーザー一覧が参加順ではありません"
+    );
     assert_eq!(
         synced.room_users[0].id, alice.user_id,
         "先頭が部屋主ではありません"
     );
-    assert_eq!(synced.room_users[0].name, "Alice");
 }
 
 #[tokio::test]

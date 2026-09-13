@@ -128,7 +128,6 @@ impl Inner {
             },
         );
         tracing::info!(id = %room.id, %number, user_id = %user.id, "部屋に参加しました");
-        // ユーザー ID は UUIDv7 で単調に増えるため、末尾へ足せば昇順が保たれる。
         room.users.push(user);
         Ok(joined)
     }

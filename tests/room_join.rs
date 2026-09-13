@@ -30,13 +30,11 @@ struct UserName {
 #[derive(Debug, Deserialize)]
 struct Created {
     code: String,
-    user_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct Joined {
     session_id: String,
-    user_id: String,
     id: String,
     next_tick: u64,
     tick_ms: u64,
@@ -85,26 +83,6 @@ async fn joins_a_room() {
     assert!(Uuid::parse_str(&joined.session_id).is_ok());
     assert!(Uuid::parse_str(&joined.id).is_ok());
     assert_eq!(joined.tick_ms, Config::default().tick_ms());
-}
-
-#[tokio::test]
-async fn joiner_id_is_greater_than_the_owner() {
-    let server = TestServer::start().await;
-    let created = prepare_room(&server, 2).await;
-
-    let joined: Joined = server
-        .post("/v3/room/join", &join_request(&created.code, "1.0"))
-        .send()
-        .await
-        .msgpack();
-
-    // UUIDv7 は参加順に増える。昇順に並べれば先頭が部屋主になる。
-    assert!(
-        created.user_id < joined.user_id,
-        "部屋主 {} より若い ID が振られました: {}",
-        created.user_id,
-        joined.user_id
-    );
 }
 
 #[tokio::test]

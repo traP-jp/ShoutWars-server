@@ -20,7 +20,7 @@ subtle = { version = "2.6.1", default-features = false }
 tokio = { version = "1.53.1", features = ["rt", "macros", "net", "time", "signal"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-uuid = { version = "1.26.0", features = ["v4", "v7", "serde"] }
+uuid = { version = "1.26.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
 # 外部サーバーの起床待ちを 1 本に絞るため OnceCell を使う。
