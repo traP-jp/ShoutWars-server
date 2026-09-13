@@ -1,6 +1,8 @@
 //! `POST /v3/room/sync`。
 
-use axum::extract::State;
+use std::time::Instant;
+
+use axum::{extract::State, response::IntoResponse};
 use rmpv::Value;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -52,6 +54,7 @@ pub struct Response {
     reports: Vec<WireEvent>,
     actions: Vec<WireEvent>,
     desync: bool,
+    held_ms: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -87,7 +90,7 @@ impl WireEvent {
 
 impl Response {
     /// `next_tick` 以降のレコードをまとめる。少なくとも 1 件あることが前提。
-    fn build(room: &Room, user: Uuid, next_tick: u64) -> Self {
+    fn build(room: &Room, user: Uuid, next_tick: u64, held_ms: u64) -> Self {
         let desync = room.is_desynced();
         let records: Vec<&Record> = room.records_from(next_tick).collect();
         let last = records
@@ -130,6 +133,7 @@ impl Response {
             reports,
             actions,
             desync,
+            held_ms,
         }
     }
 }
@@ -137,7 +141,8 @@ impl Response {
 pub async fn sync(
     State(state): State<AppState>,
     MsgPack(mut request): MsgPack<Request>,
-) -> Result<MsgPack<Response>> {
+) -> Result<impl IntoResponse> {
+    let received = Instant::now();
     check_count("reports", request.reports.len())?;
     check_count("actions", request.actions.len())?;
     for event in request.reports.iter_mut().chain(&mut request.actions) {
@@ -167,7 +172,12 @@ pub async fn sync(
             })? {
                 SyncOutcome::Ready(user) => {
                     let room = rooms.room_of(session_id)?;
-                    return Ok(MsgPack(Response::build(room, user, next_tick)));
+                    let held = received.elapsed();
+                    let held_ms = u64::try_from(held.as_millis()).unwrap_or(u64::MAX);
+                    let response = Response::build(room, user, next_tick, held_ms);
+                    // 検証ツールが読めるよう、同じ値を標準のヘッダにも書く。
+                    let timing = format!("hold;dur={:.3}", held.as_secs_f64() * 1000.0);
+                    return Ok(([("server-timing", timing)], MsgPack(response)));
                 }
                 SyncOutcome::Wait { deadline } => deadline,
             }

@@ -94,6 +94,7 @@ struct Synced {
     reports: Vec<InEvent>,
     actions: Vec<InEvent>,
     desync: bool,
+    held_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -944,6 +945,50 @@ async fn a_response_does_not_arrive_before_the_deadline() {
     assert!(
         elapsed >= Duration::from_millis(alice.tick_ms) / 2,
         "全員到着で早く締め切っています: {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn reports_how_long_the_response_was_held() {
+    // 往復が tick を超える経路では保留されずに返るため、下限を確かめられない。
+    let Some(server) = TestServer::with_config(Config::default()).await else {
+        return;
+    };
+    let alice = create_room(&server, 2).await;
+    let first: Synced = post_sync(&server, &sync_request(&alice.session_id, 0))
+        .await
+        .expect_ok();
+
+    // 窓の境界で返った直後に送るので、次の窓のほぼ全体を待つ。
+    let started = std::time::Instant::now();
+    let reply = post_sync(&server, &sync_request(&alice.session_id, first.next_tick)).await;
+    let elapsed = started.elapsed();
+
+    let synced: Synced = reply.expect_ok();
+    let held = Duration::from_millis(synced.held_ms);
+    assert!(
+        held <= elapsed,
+        "往復より長く保留したことになっています: {held:?} > {elapsed:?}"
+    );
+    assert!(
+        held >= Duration::from_millis(alice.tick_ms) / 2,
+        "保留した時間が入っていません: {held:?}"
+    );
+    let timing = reply.headers["server-timing"]
+        .to_str()
+        .expect("Server-Timing が ASCII ではありません");
+    let dur: f64 = timing
+        .strip_prefix("hold;dur=")
+        .and_then(|dur| dur.parse().ok())
+        .unwrap_or_else(|| panic!("Server-Timing の形式が異なります: {timing}"));
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "ミリ秒の値は精度を失う大きさにならない"
+    )]
+    let difference = (dur - synced.held_ms as f64).abs();
+    assert!(
+        difference <= 1.0,
+        "held_ms と Server-Timing が食い違っています: {timing}"
     );
 }
 
