@@ -13,7 +13,7 @@ use crate::{
     msgpack::MsgPack,
     record::{Event, Incoming, Record},
     room::Room,
-    room_list::{Deposit, SyncOutcome, SyncRequest},
+    room_list::{Deposit, RoomList, SyncOutcome, SyncRequest},
 };
 
 /// 1 リクエストに載せられるイベントの件数。
@@ -162,6 +162,7 @@ pub async fn sync(
         room_info: request.room_info,
     });
 
+    let mut holding = None;
     loop {
         let waiting = {
             let mut rooms = state.rooms.lock();
@@ -182,8 +183,26 @@ pub async fn sync(
                 SyncOutcome::Wait { deadline } => deadline,
             }
         };
+        holding.get_or_insert_with(|| Holding {
+            rooms: state.rooms.clone(),
+            session_id,
+        });
         // レコードは期限にしか閉じないため、期限まで眠れば必ず起きられる。
         tokio::time::sleep_until(tokio::time::Instant::from_std(waiting)).await;
+    }
+}
+
+/// 保留している間、同じセッションの次の同期を拒むための印。
+///
+/// 接続が切れてハンドラが途中で破棄されても外れるよう、`Drop` で外す。
+struct Holding {
+    rooms: RoomList,
+    session_id: Uuid,
+}
+
+impl Drop for Holding {
+    fn drop(&mut self) {
+        self.rooms.lock().release(self.session_id);
     }
 }
 

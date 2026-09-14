@@ -372,6 +372,9 @@ impl Room {
 
     /// 開いているレコードへイベントを預ける。
     ///
+    /// 同じ窓に何度預けてもよく、届いた順に連結する。拒むと、遅れて即座に応答を返した直後の
+    /// 送信が行き場を失い、クライアントが窓の境界に戻れなくなる。
+    ///
     /// 同じ `type` の報告が重複していても、まとめてはならない。
     /// まとめてよいかどうかは、
     /// 「同じ `type` の報告は上書きされる」というゲームの意味に依存する。
@@ -414,10 +417,6 @@ impl Room {
             .into_iter()
             .filter(|event| self.seen_events.insert(event.id))
             .collect()
-    }
-
-    pub fn has_deposited(&self, user: Uuid) -> bool {
-        self.pending.contains_key(&user)
     }
 
     /// 部屋主からの部屋情報を受け取る。反映は締め切り時。

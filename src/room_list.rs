@@ -5,7 +5,7 @@
 //! 待機を跨いでロックを保持する不具合が型で防がれる。
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex, MutexGuard},
     time::Instant,
 };
@@ -33,6 +33,8 @@ pub struct Inner {
     config: Arc<Config>,
     by_number: HashMap<RoomNumber, Room>,
     sessions: HashMap<Uuid, Session>,
+    /// 同期のリクエストを保留しているセッション。
+    holding: HashSet<Uuid>,
 }
 
 /// 参加コードの引き直しの上限。無いと、コードが埋まってきたときに際限なく回る。
@@ -186,7 +188,7 @@ impl Inner {
     /// 呼び出し側は期限まで待って、もう一度呼ぶ。イベントは最初の 1 回だけ預ける。
     ///
     /// # Errors
-    /// セッションが無効、二重同期、保持期間外の `next_tick` などの場合。
+    /// セッションが無効、保留中の同期がある、保持期間外の `next_tick` などの場合。
     pub fn sync(&mut self, request: SyncRequest) -> Result<SyncOutcome, Error> {
         self.sweep();
         let session = *self
@@ -205,11 +207,14 @@ impl Inner {
             .get_mut(&session.room)
             .ok_or(Error::RoomNotFound)?;
         let is_owner = room.owner_id() == Some(session.user);
+        let is_first_call = request.deposit.is_some();
+
+        // 同じ窓に何度でも預けられるため、ここで止めないと 1 台で保留を際限なく抱えられる。
+        if is_first_call && self.holding.contains(&request.session_id) {
+            return Err(Error::SyncInFlight);
+        }
 
         if let Some(deposit) = request.deposit {
-            if room.has_deposited(session.user) {
-                return Err(Error::AlreadySynced);
-            }
             if request.next_tick > room.open_tick() {
                 return Err(Error::BadRequest(
                     "next_tick が未来のレコードを指しています。".to_owned(),
@@ -241,9 +246,16 @@ impl Inner {
         if room.records_from(request.next_tick).next().is_some() {
             return Ok(SyncOutcome::Ready(session.user));
         }
-        Ok(SyncOutcome::Wait {
-            deadline: room.record_deadline(tick),
-        })
+        let deadline = room.record_deadline(tick);
+        if is_first_call {
+            self.holding.insert(request.session_id);
+        }
+        Ok(SyncOutcome::Wait { deadline })
+    }
+
+    /// 保留を終えたセッションの印を外す。
+    pub fn release(&mut self, session_id: Uuid) {
+        self.holding.remove(&session_id);
     }
 
     /// セッションが属する部屋。
@@ -318,6 +330,7 @@ impl RoomList {
             config,
             by_number: HashMap::new(),
             sessions: HashMap::new(),
+            holding: HashSet::new(),
         })))
     }
 

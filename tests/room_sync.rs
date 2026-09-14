@@ -191,8 +191,6 @@ async fn read_until(
         if found(&synced) {
             return synced;
         }
-        // 遅れている間は締め切りを待たずに応答が返るため、そのまま送ると同じ窓に二度入る。
-        wait_ticks(member, 1.0).await;
         synced = post_sync(server, &sync_request(&member.session_id, synced.next_tick))
             .await
             .expect_ok();
@@ -282,9 +280,8 @@ async fn reports_reach_the_other_users() {
 }
 
 #[tokio::test]
-async fn rejects_a_double_sync() {
-    // 2 本を同じ窓へ確実に入れるには窓を長く取るしかない。既定の 100 ms では、
-    // 経路の揺らぎで 2 本目が次の窓へずれ込みうる。
+async fn a_second_sync_in_the_same_window_is_held_and_merged() {
+    // 2 本目を 1 本目と同じ窓へ確実に入れるため、窓を長く取る。
     let Some(server) = TestServer::with_config(Config {
         tick: Duration::from_millis(500),
         ..config()
@@ -294,21 +291,60 @@ async fn rejects_a_double_sync() {
         return;
     };
     let alice = create_room(&server, 2).await;
-    join_room(&server, &alice.code(), "Bob").await;
+    // 最初のレコードを締め切らせ、遅れた状態を作る。
+    wait_ticks(&alice, 1.2).await;
 
-    // どちらが先に届くかは決められないので、順序ではなく結果の組み合わせを見る。
-    let body = sync_request(&alice.session_id, 0);
-    let (first, second) = tokio::join!(post_sync(&server, &body), post_sync(&server, &body),);
+    let mut behind = sync_request(&alice.session_id, 0);
+    behind.actions = vec![event("step", "1")];
+    let caught_up: Synced = post_sync(&server, &behind).await.expect_ok();
+    // 遅れていたので即座に返り、開いている窓に預けている。直後に送ると同じ窓に届く。
+    let mut next = sync_request(&alice.session_id, caught_up.next_tick);
+    next.applied = caught_up.actions.len() as u64;
+    next.actions = vec![event("step", "2")];
+    let held: Synced = post_sync(&server, &next).await.expect_ok();
 
-    let mut statuses = [first.status, second.status];
-    statuses.sort_unstable();
-    assert_eq!(statuses, [StatusCode::OK, StatusCode::FORBIDDEN]);
-    let rejected = if first.status == StatusCode::FORBIDDEN {
-        &first
-    } else {
-        &second
+    assert!(
+        held.held_ms > 0,
+        "同じ窓への 2 本目が保留されず、窓の境界に戻れていません"
+    );
+    let steps: Vec<&str> = held.actions.iter().map(|a| a.data.as_str()).collect();
+    assert_eq!(
+        steps,
+        ["1", "2"],
+        "同じ窓への預け入れが届いた順に連結されていません"
+    );
+}
+
+#[tokio::test]
+async fn rejects_a_sync_while_another_is_held() {
+    // 1 本目が保留されている間に 2 本目を確実に届けるため、窓を長く取る。
+    let Some(server) = TestServer::with_config(Config {
+        tick: Duration::from_millis(500),
+        ..config()
+    })
+    .await
+    else {
+        return;
     };
-    assert_eq!(rejected.error_code(), "already_synced");
+    let alice = create_room(&server, 2).await;
+
+    let first = {
+        let server = server.clone();
+        let session_id = alice.session_id.clone();
+        tokio::spawn(async move { post_sync(&server, &sync_request(&session_id, 0)).await })
+    };
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let second = post_sync(&server, &sync_request(&alice.session_id, 0)).await;
+
+    assert_eq!(second.status, StatusCode::CONFLICT);
+    assert_eq!(second.error_code(), "sync_in_flight");
+    let synced: Synced = first.await.expect("1 本目の送信が落ちました").expect_ok();
+    let next = post_sync(&server, &sync_request(&alice.session_id, synced.next_tick)).await;
+    assert_eq!(
+        next.status,
+        StatusCode::OK,
+        "保留が終わった後の同期が拒まれました"
+    );
 }
 
 #[tokio::test]

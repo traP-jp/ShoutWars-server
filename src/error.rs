@@ -21,7 +21,8 @@ pub enum Error {
     Unauthorized,
     InvalidSession,
     NotOwner,
-    AlreadySynced,
+    /// 保留中の同期の応答を待たずに、同じセッションで次を送った。
+    SyncInFlight,
     /// 定義されていないパス。クライアントが古い場合にここへ落ちる。
     NotFound,
     MethodNotAllowed,
@@ -45,7 +46,7 @@ impl Error {
             Self::Unauthorized => "unauthorized",
             Self::InvalidSession => "invalid_session",
             Self::NotOwner => "not_owner",
-            Self::AlreadySynced => "already_synced",
+            Self::SyncInFlight => "sync_in_flight",
             Self::NotFound | Self::MethodNotAllowed => "not_found",
             Self::RoomNotFound => "room_not_found",
             Self::VersionMismatch => "version_mismatch",
@@ -62,10 +63,12 @@ impl Error {
             Self::BadRequest(_) | Self::LimitExceeded(_) => StatusCode::BAD_REQUEST,
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::Unauthorized | Self::InvalidSession => StatusCode::UNAUTHORIZED,
-            Self::NotOwner | Self::AlreadySynced => StatusCode::FORBIDDEN,
+            Self::NotOwner => StatusCode::FORBIDDEN,
             Self::NotFound | Self::RoomNotFound => StatusCode::NOT_FOUND,
             Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
-            Self::VersionMismatch | Self::RoomFull | Self::GameStarted => StatusCode::CONFLICT,
+            Self::VersionMismatch | Self::RoomFull | Self::GameStarted | Self::SyncInFlight => {
+                StatusCode::CONFLICT
+            }
             Self::SyncTooOld => StatusCode::GONE,
             // 意味の上では 503 が近いが、5xx は経路上のプロキシに本文を差し替えられ、
             // クライアントが code を読めなくなる。届く範囲で最も近い 4xx を選ぶ。
@@ -82,7 +85,7 @@ impl Error {
             Self::Unauthorized => "パスワードが違います。".to_owned(),
             Self::InvalidSession => "接続が切れました。参加し直してください。".to_owned(),
             Self::NotOwner => "部屋主のみが実行できます。".to_owned(),
-            Self::AlreadySynced => "同じ tick に二重に同期しようとしました。".to_owned(),
+            Self::SyncInFlight => "前の同期の応答を待たずに、次の同期を送りました。".to_owned(),
             Self::NotFound => {
                 "そのエンドポイントはありません。ゲームを更新してください。".to_owned()
             }
