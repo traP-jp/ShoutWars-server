@@ -17,7 +17,7 @@ use crate::{
     config::Config,
     error::Error,
     record::Incoming,
-    room::{Room, RoomNumber, User},
+    room::{Realm, Room, RoomNumber, User},
 };
 
 /// セッションが指す先。
@@ -71,7 +71,13 @@ impl Inner {
     ///
     /// # Errors
     /// 部屋数が上限に達している場合、または番号を採れなかった場合。
-    pub fn create(&mut self, version: String, owner: User, size: usize) -> Result<&Room, Error> {
+    pub fn create(
+        &mut self,
+        version: String,
+        realm: Option<Realm>,
+        owner: User,
+        size: usize,
+    ) -> Result<&Room, Error> {
         self.sweep();
         if self.by_number.len() >= self.config.room_limit {
             return Err(Error::RoomLimitReached);
@@ -80,7 +86,7 @@ impl Inner {
         let (session_id, user) = (owner.session_id, owner.id);
         // 失敗し得る処理をすべて終えてからセッションを登録する。
         // 先に登録すると、部屋の作成に失敗したときに指す先の無いセッションが残る。
-        let room = Room::new(number, version, owner, size)?;
+        let room = Room::new(number, version, realm, owner, size)?;
         self.sessions
             .insert(session_id, Session { room: number, user });
         tracing::info!(id = %room.id, %number, size, "部屋を作成しました");
@@ -90,11 +96,12 @@ impl Inner {
     /// 部屋に参加する。
     ///
     /// # Errors
-    /// 部屋が無い・期限切れ・バージョン不一致・開始済み・満員・名前が長すぎる場合。
+    /// 部屋が無い・期限切れ・バージョン不一致・合言葉の不一致・開始済み・満員・名前が長すぎる場合。
     pub fn join(
         &mut self,
         number: RoomNumber,
         version: &str,
+        realm: Option<&Realm>,
         name: String,
     ) -> Result<Joined, Error> {
         self.sweep();
@@ -104,6 +111,13 @@ impl Inner {
         let room = self.by_number.get_mut(&number).ok_or(Error::RoomNotFound)?;
         if room.version != version {
             return Err(Error::VersionMismatch);
+        }
+        if room
+            .realm
+            .as_ref()
+            .is_some_and(|expected| Some(expected) != realm)
+        {
+            return Err(Error::RealmMismatch);
         }
         if room.started_at.is_some() {
             return Err(Error::GameStarted);
@@ -359,7 +373,7 @@ mod tests {
         let mut inner = rooms.lock();
 
         let owner = User::new("Alice".to_owned()).expect("名前は正しい");
-        let result = inner.create("1.0".to_owned(), owner, 99);
+        let result = inner.create("1.0".to_owned(), None, owner, 99);
 
         assert!(result.is_err(), "人数 99 は拒まれる");
         assert!(inner.sessions.is_empty(), "セッションが残っています");

@@ -119,11 +119,37 @@ impl User {
     }
 }
 
+/// 合言葉。設定した部屋には、同じ合言葉の人しか入れない。
+#[derive(Debug, PartialEq, Eq)]
+pub struct Realm(String);
+
+impl Realm {
+    const LIMIT: usize = 64;
+
+    /// 空文字列は指定なしと同じに扱う。
+    ///
+    /// # Errors
+    /// 上限を超えている場合。
+    pub fn parse(value: Option<String>) -> Result<Option<Self>, Error> {
+        let Some(value) = value.filter(|value| !value.is_empty()) else {
+            return Ok(None);
+        };
+        if value.chars().count() > Self::LIMIT {
+            return Err(Error::BadRequest(format!(
+                "合言葉は {} 文字以内です。",
+                Self::LIMIT
+            )));
+        }
+        Ok(Some(Self(value)))
+    }
+}
+
 #[derive(Debug)]
 pub struct Room {
     pub id: Uuid,
     pub number: RoomNumber,
     pub version: String,
+    pub realm: Option<Realm>,
     /// 部屋の人数の上限。
     pub size: usize,
     pub created_at: Instant,
@@ -171,6 +197,7 @@ impl Room {
     pub fn new(
         number: RoomNumber,
         version: String,
+        realm: Option<Realm>,
         owner: User,
         size: usize,
     ) -> Result<Self, Error> {
@@ -185,6 +212,7 @@ impl Room {
             id: Uuid::new_v4(),
             number,
             version,
+            realm,
             size,
             created_at: Instant::now(),
             started_at: None,

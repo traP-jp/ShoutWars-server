@@ -13,6 +13,8 @@ struct Create {
     version: String,
     user: UserName,
     size: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    realm: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -20,6 +22,8 @@ struct Join {
     version: String,
     code: String,
     user: UserName,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    realm: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +51,7 @@ fn create_request(size: usize) -> Create {
             name: "Alice".to_owned(),
         },
         size,
+        realm: None,
     }
 }
 
@@ -57,6 +62,7 @@ fn join_request(code: &str, version: &str) -> Join {
         user: UserName {
             name: "Bob".to_owned(),
         },
+        realm: None,
     }
 }
 
@@ -194,4 +200,71 @@ async fn cursor_starts_at_the_current_window() {
         "経過した窓の数と合いません: {}",
         joined.next_tick
     );
+}
+
+/// 部屋の合言葉と参加者の合言葉の組み合わせで、入れるかどうか。
+async fn join_with_realms(room: Option<&str>, joiner: Option<&str>) -> common::Reply {
+    let server = TestServer::start().await;
+    let created: Created = server
+        .post(
+            "/v3/room/create",
+            &Create {
+                realm: room.map(str::to_owned),
+                ..create_request(2)
+            },
+        )
+        .send()
+        .await
+        .msgpack();
+    server
+        .post(
+            "/v3/room/join",
+            &Join {
+                realm: joiner.map(str::to_owned),
+                ..join_request(&created.code, "1.0")
+            },
+        )
+        .send()
+        .await
+}
+
+#[tokio::test]
+async fn joins_a_room_with_the_same_realm() {
+    let reply = join_with_realms(Some("secret"), Some("secret")).await;
+    assert_eq!(reply.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn rejects_a_different_or_missing_realm() {
+    for joiner in [Some("other"), None] {
+        let reply = join_with_realms(Some("secret"), joiner).await;
+        assert_eq!(reply.status, StatusCode::FORBIDDEN, "joiner={joiner:?}");
+        assert_eq!(reply.error_code(), "realm_mismatch", "joiner={joiner:?}");
+    }
+}
+
+#[tokio::test]
+async fn anyone_joins_a_room_without_a_realm() {
+    for room in [None, Some("")] {
+        let reply = join_with_realms(room, Some("secret")).await;
+        assert_eq!(reply.status, StatusCode::OK, "room={room:?}");
+    }
+}
+
+#[tokio::test]
+async fn rejects_a_too_long_realm() {
+    let server = TestServer::start().await;
+    let reply = server
+        .post(
+            "/v3/room/create",
+            &Create {
+                realm: Some("a".repeat(65)),
+                ..create_request(2)
+            },
+        )
+        .send()
+        .await;
+
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert_eq!(reply.error_code(), "bad_request");
 }

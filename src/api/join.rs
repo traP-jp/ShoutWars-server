@@ -5,13 +5,20 @@ use rmpv::Value;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AppState, error::Result, msgpack::MsgPack, room::RoomNumber};
+use crate::{
+    AppState,
+    error::Result,
+    msgpack::MsgPack,
+    room::{Realm, RoomNumber},
+};
 
 #[derive(Debug, Deserialize)]
 pub struct Request {
     version: String,
     code: RoomNumber,
     user: UserName,
+    #[serde(default)]
+    realm: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,8 +41,14 @@ pub async fn join(
     State(state): State<AppState>,
     MsgPack(request): MsgPack<Request>,
 ) -> Result<MsgPack<Response>> {
+    let realm = Realm::parse(request.realm)?;
     let mut rooms = state.rooms.lock();
-    let joined = rooms.join(request.code, &request.version, request.user.name)?;
+    let joined = rooms.join(
+        request.code,
+        &request.version,
+        realm.as_ref(),
+        request.user.name,
+    )?;
     Ok(MsgPack(Response {
         session_id: joined.session_id,
         user_id: joined.user_id,
