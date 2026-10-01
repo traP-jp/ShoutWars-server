@@ -28,6 +28,8 @@ pub enum Error {
     MethodNotAllowed,
     RoomNotFound,
     VersionMismatch,
+    /// 部屋に合言葉があり、参加者の合言葉と違う (指定なしも含む)。
+    RealmMismatch,
     RoomFull,
     GameStarted,
     SyncTooOld,
@@ -50,6 +52,7 @@ impl Error {
             Self::NotFound | Self::MethodNotAllowed => "not_found",
             Self::RoomNotFound => "room_not_found",
             Self::VersionMismatch => "version_mismatch",
+            Self::RealmMismatch => "realm_mismatch",
             Self::RoomFull => "room_full",
             Self::GameStarted => "game_started",
             Self::SyncTooOld => "sync_too_old",
@@ -63,7 +66,7 @@ impl Error {
             Self::BadRequest(_) | Self::LimitExceeded(_) => StatusCode::BAD_REQUEST,
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::Unauthorized | Self::InvalidSession => StatusCode::UNAUTHORIZED,
-            Self::NotOwner => StatusCode::FORBIDDEN,
+            Self::NotOwner | Self::RealmMismatch => StatusCode::FORBIDDEN,
             Self::NotFound | Self::RoomNotFound => StatusCode::NOT_FOUND,
             Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
             Self::VersionMismatch | Self::RoomFull | Self::GameStarted | Self::SyncInFlight => {
@@ -93,6 +96,9 @@ impl Error {
             Self::RoomNotFound => "部屋が見つかりません。番号を確認してください。".to_owned(),
             Self::VersionMismatch => {
                 "バージョンが異なります。ゲームを更新してください。".to_owned()
+            }
+            Self::RealmMismatch => {
+                "この部屋に入るには、部屋を作った人と同じ合言葉が要ります。".to_owned()
             }
             Self::RoomFull => "部屋が満員です。".to_owned(),
             Self::GameStarted => "ゲームが既に始まっています。".to_owned(),

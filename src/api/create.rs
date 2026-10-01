@@ -8,7 +8,7 @@ use crate::{
     AppState,
     error::Result,
     msgpack::MsgPack,
-    room::{RoomNumber, User},
+    room::{Realm, RoomNumber, User},
 };
 
 #[derive(Debug, Deserialize)]
@@ -16,6 +16,8 @@ pub struct Request {
     version: String,
     user: UserName,
     size: usize,
+    #[serde(default)]
+    realm: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,11 +40,12 @@ pub async fn create(
     State(state): State<AppState>,
     MsgPack(request): MsgPack<Request>,
 ) -> Result<MsgPack<Response>> {
+    let realm = Realm::parse(request.realm)?;
     let owner = User::new(request.user.name)?;
     let (session_id, user_id) = (owner.session_id, owner.id);
 
     let mut rooms = state.rooms.lock();
-    let room = rooms.create(request.version, owner, request.size)?;
+    let room = rooms.create(request.version, realm, owner, request.size)?;
     Ok(MsgPack(Response {
         session_id,
         user_id,
